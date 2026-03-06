@@ -9,10 +9,15 @@ Presents a small window with two launch modes:
 
 - **Cloud** — launches `claude` directly in a Terminal (uses the user's
   `ANTHROPIC_API_KEY` from the environment).
-- **Local** — launches `claude` with `ANTHROPIC_BASE_URL` and
-  `ANTHROPIC_API_KEY=ollama` set, targeting a local OpenAI-compatible
-  server (Ollama, LM Studio, etc.). A **Refresh** button fetches the
-  server's model list via `GET <baseUrl>/models` and populates a dropdown.
+- **Local** — launches `claude` targeting a local OpenAI-compatible server
+  (Ollama, LM Studio, etc.). Sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY=ollama`,
+  and `CLAUDE_CONFIG_DIR=~/.claude-local` (isolated config dir so the stored
+  claude.ai oauth token doesn't conflict with the API key).
+  The **Model** text field is editable — type any model name directly.
+  A **Refresh** button fetches the server's model list via `GET <baseUrl>/models`,
+  populates a dropdown, and copies the first result into the text field.
+  Selecting a dropdown item updates the text field; the text field is the
+  single source of truth passed to `--model`.
 
 ## Files
 

@@ -13,7 +13,8 @@ static const uint32 MSG_MODE_CLOUD   = 'mCLD';
 static const uint32 MSG_MODE_LOCAL   = 'mLCL';
 static const uint32 MSG_LAUNCH       = 'mLNC';
 static const uint32 MSG_FETCH_MODELS = 'mFET';
-static const uint32 MSG_MODELS_READY = 'mMRD';
+static const uint32 MSG_MODELS_READY   = 'mMRD';
+static const uint32 MSG_MODEL_SELECTED = 'mMSL';
 
 class LauncherWindow : public BWindow {
 public:
@@ -30,6 +31,7 @@ private:
     BRadioButton*       fLocalRadio;
     BBox*               fLocalBox;
     BTextControl*       fBaseUrlField;
+    BTextControl*       fModelField;
     BMenuField*         fModelMenu;
     BPopUpMenu*         fModelPopup;
     BButton*            fRefreshBtn;

@@ -74,9 +74,11 @@ LauncherWindow::LauncherWindow()
                                     "http://localhost:11434/v1", nullptr);
     fBaseUrlField->SetDivider(70);
 
+    fModelField  = new BTextControl("model", "Model:", "", nullptr);
+    fModelField->SetDivider(70);
+
     fModelPopup  = new BPopUpMenu("(none)");
-    fModelMenu   = new BMenuField("modelMenu", "Model:", fModelPopup);
-    fModelMenu->SetDivider(70);
+    fModelMenu   = new BMenuField("modelMenu", "", fModelPopup);
     fRefreshBtn  = new BButton("refresh", "Refresh", new BMessage(MSG_FETCH_MODELS));
     fStatusView  = new BStringView("status", "");
 
@@ -87,6 +89,7 @@ LauncherWindow::LauncherWindow()
         .SetInsets(B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING,
                    B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING)
         .Add(fBaseUrlField)
+        .Add(fModelField)
         .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING)
             .Add(fModelMenu, 1.0f)
             .Add(fRefreshBtn, 0.0f)
@@ -135,6 +138,12 @@ LauncherWindow::MessageReceived(BMessage* msg)
         case MSG_MODELS_READY:
             _PopulateModels(msg);
             break;
+        case MSG_MODEL_SELECTED: {
+            BMenuItem* marked = fModelPopup->FindMarked();
+            if (marked != nullptr)
+                fModelField->SetText(marked->Label());
+            break;
+        }
         default:
             BWindow::MessageReceived(msg);
     }
@@ -203,7 +212,7 @@ LauncherWindow::_PopulateModels(BMessage* msg)
         const char* end = strchr(p, '"');
         if (end == nullptr) break;
         BString id(p, end - p);
-        fModelPopup->AddItem(new BMenuItem(id, nullptr));
+        fModelPopup->AddItem(new BMenuItem(id, new BMessage(MSG_MODEL_SELECTED)));
         p = end + 1;
         count++;
     }
@@ -212,6 +221,7 @@ LauncherWindow::_PopulateModels(BMessage* msg)
         fStatusView->SetText("No models found");
     } else {
         fModelPopup->ItemAt(0)->SetMarked(true);
+        fModelField->SetText(fModelPopup->ItemAt(0)->Label());
         BString s;
         s << count << (count == 1 ? " model" : " models") << " found";
         fStatusView->SetText(s);
@@ -228,31 +238,29 @@ LauncherWindow::_Launch()
     if (fCloudRadio->Value() == B_CONTROL_ON) {
         const char* argv[] = {
             "Terminal",
-            "--",
             kClaudeBin,
             nullptr
         };
-        be_roster->Launch(&termRef, 3, const_cast<char**>(argv));
+        be_roster->Launch(&termRef, 2, const_cast<char**>(argv));
     } else {
-        BMenuItem* marked = fModelPopup->FindMarked();
-        BString model = marked ? marked->Label() : "";
+        BString model = fModelField->Text();
         BString baseUrl = fBaseUrlField->Text();
 
         BString cmd;
-        cmd << "ANTHROPIC_BASE_URL=" << baseUrl
+        cmd << "CLAUDE_CONFIG_DIR=/boot/home/.claude-local"
+            << " ANTHROPIC_BASE_URL=" << baseUrl
             << " ANTHROPIC_API_KEY=ollama"
             << " " << kClaudeBin
             << " --model " << model;
 
         const char* argv[] = {
             "Terminal",
-            "--",
             "/bin/sh",
             "-c",
             cmd.String(),
             nullptr
         };
-        be_roster->Launch(&termRef, 5, const_cast<char**>(argv));
+        be_roster->Launch(&termRef, 4, const_cast<char**>(argv));
     }
 
     be_app->PostMessage(B_QUIT_REQUESTED);
