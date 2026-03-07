@@ -2,9 +2,8 @@
 
 #include <Box.h>
 #include <Button.h>
+#include <CheckBox.h>
 #include <FilePanel.h>
-#include <MenuField.h>
-#include <PopUpMenu.h>
 #include <RadioButton.h>
 #include <StringView.h>
 #include <TextControl.h>
@@ -12,13 +11,14 @@
 
 extern BString gPendingExec;
 
-static const uint32 MSG_BROWSE_DIR   = 'mBRW';
-static const uint32 MSG_MODE_CLOUD   = 'mCLD';
-static const uint32 MSG_MODE_LOCAL   = 'mLCL';
-static const uint32 MSG_LAUNCH       = 'mLNC';
-static const uint32 MSG_FETCH_MODELS = 'mFET';
-static const uint32 MSG_MODELS_READY   = 'mMRD';
-static const uint32 MSG_MODEL_SELECTED = 'mMSL';
+static const uint32 MSG_BROWSE_DIR           = 'mBRW';
+static const uint32 MSG_MODE_CLOUD           = 'mCLD';
+static const uint32 MSG_MODE_API             = 'mAPI';
+static const uint32 MSG_LAUNCH               = 'mLNC';
+static const uint32 MSG_API_CURRENT_MODEL    = 'mACM';
+static const uint32 MSG_API_OPUS_MODEL       = 'mAOM';
+static const uint32 MSG_API_SONNET_MODEL     = 'mASM';
+static const uint32 MSG_API_HAIKU_MODEL      = 'mAHM';
 
 class LauncherWindow : public BWindow {
 public:
@@ -27,10 +27,8 @@ public:
     void                MessageReceived(BMessage* msg) override;
 
 private:
-    void                _UpdateLocalVisibility();
+    void                _UpdateModeVisibility();
     void                _Launch();
-    void                _FetchModels();
-    void                _PopulateModels(BMessage* msg);
     void                _LoadSettings();
     void                _SaveSettings();
 
@@ -38,15 +36,17 @@ private:
     BButton*            fBrowseBtn;
     BFilePanel*         fFilePanel;
     BRadioButton*       fCloudRadio;
-    BRadioButton*       fLocalRadio;
-    BBox*               fLocalBox;
-    BTextControl*       fBaseUrlField;
-    BTextControl*       fTokensField;
-    BTextControl*       fModelField;
-    BMenuField*         fModelMenu;
-    BPopUpMenu*         fModelPopup;
-    BButton*            fRefreshBtn;
-    BStringView*        fStatusView;
+    BRadioButton*       fApiRadio;
+    BBox*               fApiBox;
+    BTextControl*       fApiUrlField;
+    BTextControl*       fApiKeyField;
+    BCheckBox*          fApiCurrentModelCheck;
+    BTextControl*       fApiCurrentModelField;
+    BCheckBox*          fApiOpusModelCheck;
+    BTextControl*       fApiOpusModelField;
+    BCheckBox*          fApiSonnetModelCheck;
+    BTextControl*       fApiSonnetModelField;
+    BCheckBox*          fApiHaikuModelCheck;
+    BTextControl*       fApiHaikuModelField;
     BButton*            fLaunchBtn;
-    thread_id           fFetchThread;
 };

@@ -5,16 +5,10 @@
 #include <Application.h>
 #include <LayoutBuilder.h>
 #include <Message.h>
-#include <MenuItem.h>
 #include <Messenger.h>
 #include <Rect.h>
 #include <Roster.h>
 #include <String.h>
-#include <Url.h>
-
-#include <netservices2/HttpRequest.h>
-#include <netservices2/HttpResult.h>
-#include <netservices2/HttpSession.h>
 
 #include <Entry.h>
 #include <FindDirectory.h>
@@ -24,40 +18,8 @@
 #include <cstring>
 #include <unistd.h>
 
-using namespace BPrivate::Network;
-
 static const char* kClaudeBin   = "/boot/home/.npm-global/bin/claude";
 static const char* kTerminalSig = "application/x-vnd.Haiku-Terminal";
-
-// ---------------------------------------------------------------------------
-// Background fetch thread
-// ---------------------------------------------------------------------------
-
-struct FetchArg {
-    BMessenger  window;
-    BString     url;
-};
-
-static status_t
-FetchThread(void* arg)
-{
-    FetchArg* fa = (FetchArg*)arg;
-    BMessage reply(MSG_MODELS_READY);
-    try {
-        BHttpSession session;
-        BHttpRequest req(BUrl(fa->url.String(), false));
-        req.SetTimeout(5'000'000);  // 5 s
-        BHttpResult result = session.Execute(std::move(req));
-        const BHttpBody& body = result.Body();
-        if (body.text.has_value())
-            reply.AddString("json", body.text.value());
-    } catch (...) {
-        // empty reply signals error
-    }
-    fa->window.SendMessage(&reply);
-    delete fa;
-    return B_OK;
-}
 
 // ---------------------------------------------------------------------------
 // LauncherWindow
@@ -68,28 +30,65 @@ LauncherWindow::LauncherWindow()
               "Claude Code Launcher",
               B_TITLED_WINDOW,
               B_QUIT_ON_WINDOW_CLOSE | B_NOT_RESIZABLE | B_AUTO_UPDATE_SIZE_LIMITS)
-    , fFetchThread(-1)
 {
-    fCloudRadio = new BRadioButton("cloudRadio", "Cloud  (Anthropic API)",
+    fCloudRadio = new BRadioButton("cloudRadio", "Cloud  (OAuth / env key)",
                                   new BMessage(MSG_MODE_CLOUD));
-    fLocalRadio = new BRadioButton("localRadio", "Local  (Ollama / local LLM)",
-                                  new BMessage(MSG_MODE_LOCAL));
+    fApiRadio   = new BRadioButton("apiRadio", "API  (API key)",
+                                  new BMessage(MSG_MODE_API));
     fCloudRadio->SetValue(B_CONTROL_ON);
 
-    fBaseUrlField = new BTextControl("baseUrl", "Base URL:",
-                                    "http://localhost:11434/v1", nullptr);
-    fBaseUrlField->SetDivider(70);
+    // API mode controls
+    fApiUrlField = new BTextControl("apiUrl", "API URL:",
+                                    "https://api.anthropic.com/v1", nullptr);
+    fApiUrlField->SetDivider(70);
 
-    fTokensField = new BTextControl("tokens", "Context tokens:", "32768", nullptr);
-    fTokensField->SetDivider(100);
+    fApiKeyField = new BTextControl("apiKey", "API Key:", "", nullptr);
+    fApiKeyField->SetDivider(70);
+    fApiKeyField->TextView()->HideTyping(true);
 
-    fModelField  = new BTextControl("model", "Model:", "", nullptr);
-    fModelField->SetDivider(70);
+    fApiCurrentModelCheck = new BCheckBox("apiCurrentModelCheck", "Override current model",
+                                          new BMessage(MSG_API_CURRENT_MODEL));
+    fApiCurrentModelField = new BTextControl("apiCurrentModel", "", "claude-sonnet-4-6", nullptr);
+    fApiCurrentModelField->SetDivider(0);
 
-    fModelPopup  = new BPopUpMenu("(none)");
-    fModelMenu   = new BMenuField("modelMenu", "", fModelPopup);
-    fRefreshBtn  = new BButton("refresh", "Refresh", new BMessage(MSG_FETCH_MODELS));
-    fStatusView  = new BStringView("status", "");
+    fApiOpusModelCheck = new BCheckBox("apiOpusModelCheck", "Override ANTHROPIC_DEFAULT_OPUS_MODEL",
+                                       new BMessage(MSG_API_OPUS_MODEL));
+    fApiOpusModelField = new BTextControl("apiOpusModel", "", "claude-opus-4-20250514", nullptr);
+    fApiOpusModelField->SetDivider(0);
+
+    fApiSonnetModelCheck = new BCheckBox("apiSonnetModelCheck", "Override ANTHROPIC_DEFAULT_SONNET_MODEL",
+                                         new BMessage(MSG_API_SONNET_MODEL));
+    fApiSonnetModelField = new BTextControl("apiSonnetModel", "", "claude-sonnet-4-6", nullptr);
+    fApiSonnetModelField->SetDivider(0);
+
+    fApiHaikuModelCheck = new BCheckBox("apiHaikuModelCheck", "Override ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                                        new BMessage(MSG_API_HAIKU_MODEL));
+    fApiHaikuModelField = new BTextControl("apiHaikuModel", "", "claude-haiku-4-20250514", nullptr);
+    fApiHaikuModelField->SetDivider(0);
+
+    // Hide model fields by default
+    fApiCurrentModelField->Hide();
+    fApiOpusModelField->Hide();
+    fApiSonnetModelField->Hide();
+    fApiHaikuModelField->Hide();
+
+    fApiBox = new BBox("apiBox");
+    fApiBox->SetLabel("API Settings");
+
+    BLayoutBuilder::Group<>(fApiBox, B_VERTICAL, B_USE_SMALL_SPACING)
+        .SetInsets(B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING,
+                   B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING)
+        .Add(fApiUrlField)
+        .Add(fApiKeyField)
+        .Add(fApiCurrentModelCheck)
+        .Add(fApiCurrentModelField)
+        .Add(fApiOpusModelCheck)
+        .Add(fApiOpusModelField)
+        .Add(fApiSonnetModelCheck)
+        .Add(fApiSonnetModelField)
+        .Add(fApiHaikuModelCheck)
+        .Add(fApiHaikuModelField)
+        .End();
 
     fWorkDirField = new BTextControl("workDir", "Directory:", "/boot/home", nullptr);
     fWorkDirField->SetDivider(70);
@@ -97,22 +96,6 @@ LauncherWindow::LauncherWindow()
 
     fFilePanel = new BFilePanel(B_OPEN_PANEL, new BMessenger(this), nullptr,
                                 B_DIRECTORY_NODE, false);
-
-    fLocalBox = new BBox("localBox");
-    fLocalBox->SetLabel("Local Settings");
-
-    BLayoutBuilder::Group<>(fLocalBox, B_VERTICAL, B_USE_SMALL_SPACING)
-        .SetInsets(B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING,
-                   B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING)
-        .Add(fBaseUrlField)
-        .Add(fModelField)
-        .Add(fTokensField)
-        .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING)
-            .Add(fModelMenu, 1.0f)
-            .Add(fRefreshBtn, 0.0f)
-            .End()
-        .Add(fStatusView)
-        .End();
 
     fLaunchBtn = new BButton("launchBtn", "Launch Claude Code", new BMessage(MSG_LAUNCH));
     fLaunchBtn->MakeDefault(true);
@@ -123,18 +106,18 @@ LauncherWindow::LauncherWindow()
         .AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
             .SetInsets(B_USE_DEFAULT_SPACING, 0, 0, 0)
             .Add(fCloudRadio)
-            .Add(fLocalRadio)
+            .Add(fApiRadio)
             .End()
         .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING)
             .Add(fWorkDirField)
             .Add(fBrowseBtn, 0.0f)
             .End()
-        .Add(fLocalBox)
+        .Add(fApiBox)
         .AddGlue()
         .Add(fLaunchBtn)
         .End();
 
-    fLocalBox->Hide();
+    fApiBox->Hide();
 
     InvalidateLayout(true);
     BSize preferred = GetLayout()->PreferredSize();
@@ -167,106 +150,58 @@ LauncherWindow::MessageReceived(BMessage* msg)
             break;
         }
         case MSG_MODE_CLOUD:
-        case MSG_MODE_LOCAL:
-            _UpdateLocalVisibility();
+        case MSG_MODE_API:
+            _UpdateModeVisibility();
             break;
         case MSG_LAUNCH:
             _Launch();
             break;
-        case MSG_FETCH_MODELS:
-            _FetchModels();
+        case MSG_API_CURRENT_MODEL:
+            if (fApiCurrentModelCheck->Value() == B_CONTROL_ON)
+                fApiCurrentModelField->Show();
+            else
+                fApiCurrentModelField->Hide();
+            _UpdateModeVisibility();
             break;
-        case MSG_MODELS_READY:
-            _PopulateModels(msg);
+        case MSG_API_OPUS_MODEL:
+            if (fApiOpusModelCheck->Value() == B_CONTROL_ON)
+                fApiOpusModelField->Show();
+            else
+                fApiOpusModelField->Hide();
+            _UpdateModeVisibility();
             break;
-        case MSG_MODEL_SELECTED: {
-            BMenuItem* marked = fModelPopup->FindMarked();
-            if (marked != nullptr)
-                fModelField->SetText(marked->Label());
+        case MSG_API_SONNET_MODEL:
+            if (fApiSonnetModelCheck->Value() == B_CONTROL_ON)
+                fApiSonnetModelField->Show();
+            else
+                fApiSonnetModelField->Hide();
+            _UpdateModeVisibility();
             break;
-        }
+        case MSG_API_HAIKU_MODEL:
+            if (fApiHaikuModelCheck->Value() == B_CONTROL_ON)
+                fApiHaikuModelField->Show();
+            else
+                fApiHaikuModelField->Hide();
+            _UpdateModeVisibility();
+            break;
         default:
             BWindow::MessageReceived(msg);
     }
 }
 
 void
-LauncherWindow::_UpdateLocalVisibility()
+LauncherWindow::_UpdateModeVisibility()
 {
-    if (fLocalRadio->Value() == B_CONTROL_ON)
-        fLocalBox->Show();
-    else
-        fLocalBox->Hide();
+    if (fApiRadio->Value() == B_CONTROL_ON) {
+        fApiBox->Show();
+    } else {
+        fApiBox->Hide();
+    }
 
     InvalidateLayout(true);
     BSize preferred = GetLayout()->PreferredSize();
     SetSizeLimits(preferred.width, preferred.width, preferred.height, preferred.height);
     ResizeTo(preferred.width, preferred.height);
-}
-
-void
-LauncherWindow::_FetchModels()
-{
-    if (fFetchThread >= 0)
-        return;  // already in progress
-
-    fStatusView->SetText("Fetching\xe2\x80\xa6");  // "Fetching…" UTF-8
-    fRefreshBtn->SetEnabled(false);
-
-    FetchArg* fa = new FetchArg();
-    fa->window = BMessenger(this);
-    fa->url    = fBaseUrlField->Text();
-    fa->url   << "/models";
-
-    fFetchThread = spawn_thread(FetchThread, "model-fetch",
-                                B_NORMAL_PRIORITY, fa);
-    if (fFetchThread < 0) {
-        delete fa;
-        fStatusView->SetText("Error: could not spawn thread");
-        fRefreshBtn->SetEnabled(true);
-        return;
-    }
-    resume_thread(fFetchThread);
-}
-
-void
-LauncherWindow::_PopulateModels(BMessage* msg)
-{
-    fFetchThread = -1;
-    fRefreshBtn->SetEnabled(true);
-
-    const char* json = msg->GetString("json", nullptr);
-    if (json == nullptr) {
-        fStatusView->SetText("Error: no response");
-        return;
-    }
-
-    // Clear old items
-    while (fModelPopup->CountItems() > 0)
-        delete fModelPopup->RemoveItem((int32)0);
-
-    // Parse: scan for "id":" ... "
-    int count = 0;
-    const char* p = json;
-    while ((p = strstr(p, "\"id\":\"")) != nullptr) {
-        p += 6;
-        const char* end = strchr(p, '"');
-        if (end == nullptr) break;
-        BString id(p, end - p);
-        fModelPopup->AddItem(new BMenuItem(id, new BMessage(MSG_MODEL_SELECTED)));
-        p = end + 1;
-        count++;
-    }
-
-    if (count == 0) {
-        fStatusView->SetText("No models found");
-    } else {
-        fModelPopup->ItemAt(0)->SetMarked(true);
-        fModelField->SetText(fModelPopup->ItemAt(0)->Label());
-        BString s;
-        s << count << (count == 1 ? " model" : " models") << " found";
-        fStatusView->SetText(s);
-    }
 }
 
 void
@@ -280,19 +215,35 @@ LauncherWindow::_Launch()
 
     if (fCloudRadio->Value() == B_CONTROL_ON) {
         cmd << kClaudeBin;
-    } else {
-        BString model = fModelField->Text();
-        BString baseUrl = fBaseUrlField->Text();
-        int32 numCtx = atoi(fTokensField->Text());
-        if (numCtx < 32768) numCtx = 32768;
+    } else if (fApiRadio->Value() == B_CONTROL_ON) {
+        BString apiUrl = fApiUrlField->Text();
+        BString apiKey = fApiKeyField->Text();
+        cmd << "ANTHROPIC_BASE_URL='" << apiUrl << "'"
+            << " ANTHROPIC_API_KEY='" << apiKey << "'";
 
-        cmd << "OLLAMA_NUM_CTX=" << numCtx
-            << " LM_STUDIO_NUM_CTX=" << numCtx
-            << " CLAUDE_CONFIG_DIR=/boot/home/.claude-local"
-            << " ANTHROPIC_BASE_URL=" << baseUrl
-            << " ANTHROPIC_API_KEY=ollama"
-            << " " << kClaudeBin
-            << " --model " << model;
+        if (fApiOpusModelCheck->Value() == B_CONTROL_ON) {
+            BString opusModel = fApiOpusModelField->Text();
+            if (opusModel.Length() > 0)
+                cmd << " ANTHROPIC_DEFAULT_OPUS_MODEL='" << opusModel << "'";
+        }
+        if (fApiSonnetModelCheck->Value() == B_CONTROL_ON) {
+            BString sonnetModel = fApiSonnetModelField->Text();
+            if (sonnetModel.Length() > 0)
+                cmd << " ANTHROPIC_DEFAULT_SONNET_MODEL='" << sonnetModel << "'";
+        }
+        if (fApiHaikuModelCheck->Value() == B_CONTROL_ON) {
+            BString haikuModel = fApiHaikuModelField->Text();
+            if (haikuModel.Length() > 0)
+                cmd << " ANTHROPIC_DEFAULT_HAIKU_MODEL='" << haikuModel << "'";
+        }
+
+        cmd << " " << kClaudeBin;
+
+        if (fApiCurrentModelCheck->Value() == B_CONTROL_ON) {
+            BString currentModel = fApiCurrentModelField->Text();
+            if (currentModel.Length() > 0)
+                cmd << " --model '" << currentModel << "'";
+        }
     }
 
     _SaveSettings();
@@ -336,29 +287,77 @@ LauncherWindow::_LoadSettings()
     BMessage settings;
     if (settings.Unflatten(&file) != B_OK) return;
 
-    bool localMode = false;
-    settings.FindBool("localMode", &localMode);
-    if (localMode) {
-        fLocalRadio->SetValue(B_CONTROL_ON);
+    int32 mode = 0;  // 0=cloud, 1=api
+    settings.FindInt32("mode", &mode);
+    if (mode == 1) {
+        fApiRadio->SetValue(B_CONTROL_ON);
         fCloudRadio->SetValue(B_CONTROL_OFF);
-        _UpdateLocalVisibility();
+        _UpdateModeVisibility();
     }
-
-    const char* url = nullptr;
-    if (settings.FindString("baseUrl", &url) == B_OK)
-        fBaseUrlField->SetText(url);
-
-    const char* model = nullptr;
-    if (settings.FindString("model", &model) == B_OK)
-        fModelField->SetText(model);
 
     const char* workDir = nullptr;
     if (settings.FindString("workDir", &workDir) == B_OK)
         fWorkDirField->SetText(workDir);
 
-    const char* tokens = nullptr;
-    if (settings.FindString("tokens", &tokens) == B_OK)
-        fTokensField->SetText(tokens);
+    const char* apiUrl = nullptr;
+    if (settings.FindString("apiUrl", &apiUrl) == B_OK)
+        fApiUrlField->SetText(apiUrl);
+
+    const char* apiKey = nullptr;
+    if (settings.FindString("apiKey", &apiKey) == B_OK)
+        fApiKeyField->SetText(apiKey);
+
+    bool currentModelCheck = false;
+    if (settings.FindBool("apiCurrentModelCheck", &currentModelCheck) == B_OK) {
+        fApiCurrentModelCheck->SetValue(currentModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (currentModelCheck)
+            fApiCurrentModelField->Show();
+        else
+            fApiCurrentModelField->Hide();
+    }
+
+    const char* apiCurrentModel = nullptr;
+    if (settings.FindString("apiCurrentModel", &apiCurrentModel) == B_OK)
+        fApiCurrentModelField->SetText(apiCurrentModel);
+
+    bool opusModelCheck = false;
+    if (settings.FindBool("apiOpusModelCheck", &opusModelCheck) == B_OK) {
+        fApiOpusModelCheck->SetValue(opusModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (opusModelCheck)
+            fApiOpusModelField->Show();
+        else
+            fApiOpusModelField->Hide();
+    }
+
+    const char* apiOpusModel = nullptr;
+    if (settings.FindString("apiOpusModel", &apiOpusModel) == B_OK)
+        fApiOpusModelField->SetText(apiOpusModel);
+
+    bool sonnetModelCheck = false;
+    if (settings.FindBool("apiSonnetModelCheck", &sonnetModelCheck) == B_OK) {
+        fApiSonnetModelCheck->SetValue(sonnetModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (sonnetModelCheck)
+            fApiSonnetModelField->Show();
+        else
+            fApiSonnetModelField->Hide();
+    }
+
+    const char* apiSonnetModel = nullptr;
+    if (settings.FindString("apiSonnetModel", &apiSonnetModel) == B_OK)
+        fApiSonnetModelField->SetText(apiSonnetModel);
+
+    bool haikuModelCheck = false;
+    if (settings.FindBool("apiHaikuModelCheck", &haikuModelCheck) == B_OK) {
+        fApiHaikuModelCheck->SetValue(haikuModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (haikuModelCheck)
+            fApiHaikuModelField->Show();
+        else
+            fApiHaikuModelField->Hide();
+    }
+
+    const char* apiHaikuModel = nullptr;
+    if (settings.FindString("apiHaikuModel", &apiHaikuModel) == B_OK)
+        fApiHaikuModelField->SetText(apiHaikuModel);
 }
 
 void
@@ -371,11 +370,22 @@ LauncherWindow::_SaveSettings()
     BFile file(path.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
     if (file.InitCheck() != B_OK) return;
 
+    int32 mode = 0;  // 0=cloud, 1=api
+    if (fApiRadio->Value() == B_CONTROL_ON)
+        mode = 1;
+
     BMessage settings;
-    settings.AddBool("localMode", fLocalRadio->Value() == B_CONTROL_ON);
-    settings.AddString("baseUrl", fBaseUrlField->Text());
-    settings.AddString("model", fModelField->Text());
+    settings.AddInt32("mode", mode);
     settings.AddString("workDir", fWorkDirField->Text());
-    settings.AddString("tokens", fTokensField->Text());
+    settings.AddString("apiUrl", fApiUrlField->Text());
+    settings.AddString("apiKey", fApiKeyField->Text());
+    settings.AddBool("apiCurrentModelCheck", fApiCurrentModelCheck->Value() == B_CONTROL_ON);
+    settings.AddString("apiCurrentModel", fApiCurrentModelField->Text());
+    settings.AddBool("apiOpusModelCheck", fApiOpusModelCheck->Value() == B_CONTROL_ON);
+    settings.AddString("apiOpusModel", fApiOpusModelField->Text());
+    settings.AddBool("apiSonnetModelCheck", fApiSonnetModelCheck->Value() == B_CONTROL_ON);
+    settings.AddString("apiSonnetModel", fApiSonnetModelField->Text());
+    settings.AddBool("apiHaikuModelCheck", fApiHaikuModelCheck->Value() == B_CONTROL_ON);
+    settings.AddString("apiHaikuModel", fApiHaikuModelField->Text());
     settings.Flatten(&file);
 }

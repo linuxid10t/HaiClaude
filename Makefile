@@ -2,9 +2,8 @@
 
 CXX      = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -Wno-unused-parameter \
-           -I/boot/system/develop/headers/private \
-           -I/boot/system/develop/headers/private/netservices2
-LIBS     = -lbe -lroot -lnetservices2 -lbnetapi -ltracker
+           -I/boot/system/develop/headers/private
+LIBS     = -lbe -lroot -lbnetapi -ltracker
 TARGET   = haiclaude
 
 SRCS = main.cpp LauncherWindow.cpp

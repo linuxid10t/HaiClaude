@@ -4,22 +4,22 @@ Native Haiku GUI launcher for [Claude Code](https://docs.anthropic.com/en/docs/c
 
 ## Features
 
-- **Cloud mode** — launches Claude Code in a Terminal using your `ANTHROPIC_API_KEY`.
-- **Local mode** — launches Claude Code against a local OpenAI-compatible server (Ollama, LM Studio, etc.) with:
-  - Configurable **Base URL** (default: `http://localhost:11434/v1`)
-  - **Model** text field — type any model name, or use **Refresh** to fetch the server's model list and pick from a dropdown
-  - **Context tokens** field — sets `OLLAMA_NUM_CTX` and `LM_STUDIO_NUM_CTX` so the server loads the configured context window (minimum 32768, default 32768)
-  - Isolated config dir (`~/.claude-local`) so local and cloud credentials don't conflict
+- **Cloud mode** — launches Claude Code using OAuth or your existing `ANTHROPIC_API_KEY` environment variable.
+- **API mode** — launches Claude Code with a custom API configuration:
+  - **API URL** — defaults to Anthropic's API, but can be changed for proxies or alternative endpoints
+  - **API Key** — your Anthropic API key (input is masked)
+  - **Model overrides** — optionally override the default Opus, Sonnet, and Haiku model versions
+  - **Current model override** — force a specific model via `--model`
 - **Working directory** picker — persistent text field with a **Browse…** button; Claude Code starts in the chosen directory.
-- All settings (mode, base URL, model, context tokens, working directory) are saved across sessions.
+- All settings are saved across sessions.
 
 ## Screenshot
 
-![HaiClaude window in Local mode](screenshot.png)
+![HaiClaude window](screenshot.png)
 
 ## Requirements
 
-- Haiku R1β5 or later (requires `libnetservices2`)
+- Haiku R1β5 or later
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed at `/boot/home/.npm-global/bin/claude`
 
 ## Build
@@ -29,7 +29,7 @@ make
 ./haiclaude
 ```
 
-Links against: `-lbe -lroot -lnetservices2 -lbnetapi -ltracker`
+Links against: `-lbe -lroot -lbnetapi -ltracker`
 
 ## Install
 
