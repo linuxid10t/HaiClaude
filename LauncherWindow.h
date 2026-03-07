@@ -41,6 +41,7 @@ private:
     BRadioButton*       fLocalRadio;
     BBox*               fLocalBox;
     BTextControl*       fBaseUrlField;
+    BTextControl*       fTokensField;
     BTextControl*       fModelField;
     BMenuField*         fModelMenu;
     BPopUpMenu*         fModelPopup;

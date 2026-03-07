@@ -80,6 +80,9 @@ LauncherWindow::LauncherWindow()
                                     "http://localhost:11434/v1", nullptr);
     fBaseUrlField->SetDivider(70);
 
+    fTokensField = new BTextControl("tokens", "Context tokens:", "32768", nullptr);
+    fTokensField->SetDivider(100);
+
     fModelField  = new BTextControl("model", "Model:", "", nullptr);
     fModelField->SetDivider(70);
 
@@ -103,6 +106,7 @@ LauncherWindow::LauncherWindow()
                    B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING)
         .Add(fBaseUrlField)
         .Add(fModelField)
+        .Add(fTokensField)
         .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING)
             .Add(fModelMenu, 1.0f)
             .Add(fRefreshBtn, 0.0f)
@@ -279,7 +283,12 @@ LauncherWindow::_Launch()
     } else {
         BString model = fModelField->Text();
         BString baseUrl = fBaseUrlField->Text();
-        cmd << "CLAUDE_CONFIG_DIR=/boot/home/.claude-local"
+        int32 numCtx = atoi(fTokensField->Text());
+        if (numCtx < 32768) numCtx = 32768;
+
+        cmd << "OLLAMA_NUM_CTX=" << numCtx
+            << " LM_STUDIO_NUM_CTX=" << numCtx
+            << " CLAUDE_CONFIG_DIR=/boot/home/.claude-local"
             << " ANTHROPIC_BASE_URL=" << baseUrl
             << " ANTHROPIC_API_KEY=ollama"
             << " " << kClaudeBin
@@ -346,6 +355,10 @@ LauncherWindow::_LoadSettings()
     const char* workDir = nullptr;
     if (settings.FindString("workDir", &workDir) == B_OK)
         fWorkDirField->SetText(workDir);
+
+    const char* tokens = nullptr;
+    if (settings.FindString("tokens", &tokens) == B_OK)
+        fTokensField->SetText(tokens);
 }
 
 void
@@ -363,5 +376,6 @@ LauncherWindow::_SaveSettings()
     settings.AddString("baseUrl", fBaseUrlField->Text());
     settings.AddString("model", fModelField->Text());
     settings.AddString("workDir", fWorkDirField->Text());
+    settings.AddString("tokens", fTokensField->Text());
     settings.Flatten(&file);
 }

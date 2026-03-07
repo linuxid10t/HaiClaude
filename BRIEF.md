@@ -18,6 +18,10 @@ Presents a small window with two launch modes and a working directory picker:
   populates a dropdown, and copies the first result into the text field.
   Selecting a dropdown item updates the text field; the text field is the
   single source of truth passed to `--model`.
+  The **Context tokens** field sets the model's context window size. It is
+  injected as `OLLAMA_NUM_CTX` and `LM_STUDIO_NUM_CTX` environment variables
+  so both Ollama and LM Studio pick it up. The minimum is 32768 (values below
+  this are clamped at launch time). The value is saved across sessions.
 - **Working directory** — a persistent text field (with a **Browse…** button
   that opens a directory panel) sets the directory Claude Code starts in.
   If non-empty, the launch command is prefixed with `cd '<dir>' &&`.
