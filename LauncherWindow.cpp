@@ -31,11 +31,27 @@ LauncherWindow::LauncherWindow()
               B_TITLED_WINDOW,
               B_QUIT_ON_WINDOW_CLOSE | B_NOT_RESIZABLE | B_AUTO_UPDATE_SIZE_LIMITS)
 {
-    fCloudRadio = new BRadioButton("cloudRadio", "Cloud  (OAuth / env key)",
+    fCloudRadio = new BRadioButton("cloudRadio", "Cloud",
                                   new BMessage(MSG_MODE_CLOUD));
     fApiRadio   = new BRadioButton("apiRadio", "API  (API key)",
                                   new BMessage(MSG_MODE_API));
     fCloudRadio->SetValue(B_CONTROL_ON);
+
+    // Model selection radio buttons in their own BBox (separate radio group)
+    fCloudOpusRadio = new BRadioButton("cloudOpus", "Opus", nullptr);
+    fCloudSonnetRadio = new BRadioButton("cloudSonnet", "Sonnet", nullptr);
+    fCloudHaikuRadio = new BRadioButton("cloudHaiku", "Haiku", nullptr);
+    fCloudOpusRadio->SetValue(B_CONTROL_ON);
+
+    fModelBox = new BBox("modelBox");
+    fModelBox->SetLabel("Model");
+    BLayoutBuilder::Group<>(fModelBox, B_HORIZONTAL, B_USE_SMALL_SPACING)
+        .SetInsets(B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING,
+                   B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING)
+        .Add(fCloudOpusRadio)
+        .Add(fCloudSonnetRadio)
+        .Add(fCloudHaikuRadio)
+        .End();
 
     // API mode controls
     fApiUrlField = new BTextControl("apiUrl", "API URL:",
@@ -108,6 +124,7 @@ LauncherWindow::LauncherWindow()
             .Add(fCloudRadio)
             .Add(fApiRadio)
             .End()
+        .Add(fModelBox)
         .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING)
             .Add(fWorkDirField)
             .Add(fBrowseBtn, 0.0f)
@@ -117,14 +134,13 @@ LauncherWindow::LauncherWindow()
         .Add(fLaunchBtn)
         .End();
 
-    fApiBox->Hide();
-
     InvalidateLayout(true);
     BSize preferred = GetLayout()->PreferredSize();
     ResizeTo(preferred.width, preferred.height);
     CenterOnScreen();
 
     _LoadSettings();
+    _UpdateModeVisibility();  // Ensure correct visibility based on mode
 }
 
 LauncherWindow::~LauncherWindow()
@@ -193,8 +209,10 @@ void
 LauncherWindow::_UpdateModeVisibility()
 {
     if (fApiRadio->Value() == B_CONTROL_ON) {
+        fModelBox->Hide();
         fApiBox->Show();
     } else {
+        fModelBox->Show();
         fApiBox->Hide();
     }
 
@@ -214,11 +232,22 @@ LauncherWindow::_Launch()
         cmd << "cd '" << workDir << "' && ";
 
     if (fCloudRadio->Value() == B_CONTROL_ON) {
-        cmd << kClaudeBin;
+        // Unset API key to avoid conflict with claude.ai OAuth token
+        cmd << "unset ANTHROPIC_API_KEY && " << kClaudeBin;
+
+        // Add model selection
+        if (fCloudSonnetRadio->Value() == B_CONTROL_ON)
+            cmd << " --model sonnet";
+        else if (fCloudHaikuRadio->Value() == B_CONTROL_ON)
+            cmd << " --model haiku";
+        else
+            cmd << " --model opus";
     } else if (fApiRadio->Value() == B_CONTROL_ON) {
         BString apiUrl = fApiUrlField->Text();
         BString apiKey = fApiKeyField->Text();
-        cmd << "ANTHROPIC_BASE_URL='" << apiUrl << "'"
+        // Temporarily move credentials aside, run with API key, then restore
+        cmd << "mv \"$HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json.bak\" 2>/dev/null; "
+            << "ANTHROPIC_BASE_URL='" << apiUrl << "'"
             << " ANTHROPIC_API_KEY='" << apiKey << "'";
 
         if (fApiOpusModelCheck->Value() == B_CONTROL_ON) {
@@ -244,6 +273,9 @@ LauncherWindow::_Launch()
             if (currentModel.Length() > 0)
                 cmd << " --model '" << currentModel << "'";
         }
+
+        // After claude exits, restore credentials
+        cmd << "; mv \"$HOME/.claude/.credentials.json.bak\" \"$HOME/.claude/.credentials.json\" 2>/dev/null";
     }
 
     _SaveSettings();
@@ -293,6 +325,16 @@ LauncherWindow::_LoadSettings()
         fApiRadio->SetValue(B_CONTROL_ON);
         fCloudRadio->SetValue(B_CONTROL_OFF);
         _UpdateModeVisibility();
+    }
+
+    int32 cloudModel = 0;  // 0=opus, 1=sonnet, 2=haiku
+    settings.FindInt32("cloudModel", &cloudModel);
+    if (cloudModel == 1) {
+        fCloudSonnetRadio->SetValue(B_CONTROL_ON);
+    } else if (cloudModel == 2) {
+        fCloudHaikuRadio->SetValue(B_CONTROL_ON);
+    } else {
+        fCloudOpusRadio->SetValue(B_CONTROL_ON);
     }
 
     const char* workDir = nullptr;
@@ -374,8 +416,15 @@ LauncherWindow::_SaveSettings()
     if (fApiRadio->Value() == B_CONTROL_ON)
         mode = 1;
 
+    int32 cloudModel = 0;  // 0=opus, 1=sonnet, 2=haiku
+    if (fCloudSonnetRadio->Value() == B_CONTROL_ON)
+        cloudModel = 1;
+    else if (fCloudHaikuRadio->Value() == B_CONTROL_ON)
+        cloudModel = 2;
+
     BMessage settings;
     settings.AddInt32("mode", mode);
+    settings.AddInt32("cloudModel", cloudModel);
     settings.AddString("workDir", fWorkDirField->Text());
     settings.AddString("apiUrl", fApiUrlField->Text());
     settings.AddString("apiKey", fApiKeyField->Text());

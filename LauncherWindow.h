@@ -37,6 +37,10 @@ private:
     BFilePanel*         fFilePanel;
     BRadioButton*       fCloudRadio;
     BRadioButton*       fApiRadio;
+    BBox*               fModelBox;
+    BRadioButton*       fCloudOpusRadio;
+    BRadioButton*       fCloudSonnetRadio;
+    BRadioButton*       fCloudHaikuRadio;
     BBox*               fApiBox;
     BTextControl*       fApiUrlField;
     BTextControl*       fApiKeyField;

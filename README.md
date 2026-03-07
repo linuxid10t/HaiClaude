@@ -5,6 +5,7 @@ Native Haiku GUI launcher for [Claude Code](https://docs.anthropic.com/en/docs/c
 ## Features
 
 - **Cloud mode** — launches Claude Code using OAuth or your existing `ANTHROPIC_API_KEY` environment variable.
+  - **Model selection** — choose between Opus, Sonnet, or Haiku models
 - **API mode** — launches Claude Code with a custom API configuration:
   - **API URL** — defaults to Anthropic's API, but can be changed for proxies or alternative endpoints
   - **API Key** — your Anthropic API key (input is masked)
