@@ -5,9 +5,9 @@ Author: David Masson
 
 ## What it does
 
-Presents a small window with two launch modes:
+Presents a small window with two launch modes and a working directory picker:
 
-- **Cloud** — launches `claude` directly in a Terminal (uses the user's
+- **Cloud** — launches `claude` in a Terminal (uses the user's
   `ANTHROPIC_API_KEY` from the environment).
 - **Local** — launches `claude` targeting a local OpenAI-compatible server
   (Ollama, LM Studio, etc.). Sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY=ollama`,
@@ -18,6 +18,10 @@ Presents a small window with two launch modes:
   populates a dropdown, and copies the first result into the text field.
   Selecting a dropdown item updates the text field; the text field is the
   single source of truth passed to `--model`.
+- **Working directory** — a persistent text field (with a **Browse…** button
+  that opens a directory panel) sets the directory Claude Code starts in.
+  If non-empty, the launch command is prefixed with `cd '<dir>' &&`.
+  The field defaults to `/boot/home` and is saved across sessions.
 
 ## Files
 
@@ -35,6 +39,7 @@ make
 ```
 
 Requires Haiku with `libnetservices2` (present in R1β5+).
+Links: `-lbe -lroot -lnetservices2 -lbnetapi -ltracker`
 
 ## Key implementation notes
 
@@ -49,6 +54,15 @@ Requires Haiku with `libnetservices2` (present in R1β5+).
 - **Sentinel arithmetic is a bug**: `B_USE_DEFAULT_SPACING = -1002`.
   Never do `B_USE_DEFAULT_SPACING + N` in layout calls — pass sentinels
   as-is.
+- **Terminal launch**: uses `fork+execl` on the Terminal binary directly
+  (obtained via `be_roster->FindApp` → `BEntry` → `BPath`). Using
+  `be_roster->Launch()` causes Terminal to open two windows (one from
+  `B_READY_TO_RUN`, one from `B_ARGV_RECEIVED`).
+- **Terminal reuse when run from a shell**: if `isatty(STDIN_FILENO)`,
+  the command is stored in `gPendingExec` and executed via `execl` after
+  `BApplication::Run()` returns, reusing the existing terminal.
+- **Directory picker**: `BFilePanel` (from `libtracker`) configured with
+  `B_DIRECTORY_NODE`. The selected path arrives as `B_REFS_RECEIVED`.
 
 ## Paths
 

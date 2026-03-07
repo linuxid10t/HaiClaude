@@ -16,7 +16,13 @@
 #include <netservices2/HttpResult.h>
 #include <netservices2/HttpSession.h>
 
+#include <Entry.h>
+#include <FindDirectory.h>
+#include <File.h>
+#include <Path.h>
+
 #include <cstring>
+#include <unistd.h>
 
 using namespace BPrivate::Network;
 
@@ -82,6 +88,13 @@ LauncherWindow::LauncherWindow()
     fRefreshBtn  = new BButton("refresh", "Refresh", new BMessage(MSG_FETCH_MODELS));
     fStatusView  = new BStringView("status", "");
 
+    fWorkDirField = new BTextControl("workDir", "Directory:", "/boot/home", nullptr);
+    fWorkDirField->SetDivider(70);
+    fBrowseBtn = new BButton("browse", "Browse\xe2\x80\xa6", new BMessage(MSG_BROWSE_DIR));
+
+    fFilePanel = new BFilePanel(B_OPEN_PANEL, new BMessenger(this), nullptr,
+                                B_DIRECTORY_NODE, false);
+
     fLocalBox = new BBox("localBox");
     fLocalBox->SetLabel("Local Settings");
 
@@ -108,6 +121,10 @@ LauncherWindow::LauncherWindow()
             .Add(fCloudRadio)
             .Add(fLocalRadio)
             .End()
+        .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING)
+            .Add(fWorkDirField)
+            .Add(fBrowseBtn, 0.0f)
+            .End()
         .Add(fLocalBox)
         .AddGlue()
         .Add(fLaunchBtn)
@@ -119,12 +136,32 @@ LauncherWindow::LauncherWindow()
     BSize preferred = GetLayout()->PreferredSize();
     ResizeTo(preferred.width, preferred.height);
     CenterOnScreen();
+
+    _LoadSettings();
+}
+
+LauncherWindow::~LauncherWindow()
+{
+    delete fFilePanel;
 }
 
 void
 LauncherWindow::MessageReceived(BMessage* msg)
 {
     switch (msg->what) {
+        case MSG_BROWSE_DIR:
+            fFilePanel->Show();
+            break;
+        case B_REFS_RECEIVED: {
+            entry_ref ref;
+            if (msg->FindRef("refs", &ref) == B_OK) {
+                BEntry entry(&ref);
+                BPath path;
+                if (entry.GetPath(&path) == B_OK)
+                    fWorkDirField->SetText(path.Path());
+            }
+            break;
+        }
         case MSG_MODE_CLOUD:
         case MSG_MODE_LOCAL:
             _UpdateLocalVisibility();
@@ -231,37 +268,100 @@ LauncherWindow::_PopulateModels(BMessage* msg)
 void
 LauncherWindow::_Launch()
 {
-    entry_ref termRef;
-    if (be_roster->FindApp(kTerminalSig, &termRef) != B_OK)
-        return;
+    // Build the shell command
+    BString workDir = fWorkDirField->Text();
+    BString cmd;
+    if (strlen(workDir) > 0)
+        cmd << "cd '" << workDir << "' && ";
 
     if (fCloudRadio->Value() == B_CONTROL_ON) {
-        const char* argv[] = {
-            "Terminal",
-            kClaudeBin,
-            nullptr
-        };
-        be_roster->Launch(&termRef, 2, const_cast<char**>(argv));
+        cmd << kClaudeBin;
     } else {
         BString model = fModelField->Text();
         BString baseUrl = fBaseUrlField->Text();
-
-        BString cmd;
         cmd << "CLAUDE_CONFIG_DIR=/boot/home/.claude-local"
             << " ANTHROPIC_BASE_URL=" << baseUrl
             << " ANTHROPIC_API_KEY=ollama"
             << " " << kClaudeBin
             << " --model " << model;
+    }
 
-        const char* argv[] = {
-            "Terminal",
-            "/bin/sh",
-            "-c",
-            cmd.String(),
-            nullptr
-        };
-        be_roster->Launch(&termRef, 4, const_cast<char**>(argv));
+    _SaveSettings();
+
+    if (isatty(STDIN_FILENO)) {
+        // Launched from a terminal — exec claude there after the GUI exits
+        // rather than opening a second terminal window.
+        gPendingExec = cmd;
+    } else {
+        // Launched from Tracker/Deskbar — spawn a fresh Terminal process.
+        // Using fork+exec (not be_roster->Launch) avoids Terminal opening
+        // a second default window via B_READY_TO_RUN.
+        entry_ref termRef;
+        if (be_roster->FindApp(kTerminalSig, &termRef) == B_OK) {
+            BEntry entry(&termRef);
+            BPath termPath;
+            if (entry.GetPath(&termPath) == B_OK) {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    execl(termPath.Path(), "Terminal",
+                          "/bin/sh", "-c", cmd.String(), (char*)nullptr);
+                    _exit(1);
+                }
+            }
+        }
     }
 
     be_app->PostMessage(B_QUIT_REQUESTED);
+}
+
+void
+LauncherWindow::_LoadSettings()
+{
+    BPath path;
+    if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK) return;
+    path.Append("HaiClaude");
+
+    BFile file(path.Path(), B_READ_ONLY);
+    if (file.InitCheck() != B_OK) return;
+
+    BMessage settings;
+    if (settings.Unflatten(&file) != B_OK) return;
+
+    bool localMode = false;
+    settings.FindBool("localMode", &localMode);
+    if (localMode) {
+        fLocalRadio->SetValue(B_CONTROL_ON);
+        fCloudRadio->SetValue(B_CONTROL_OFF);
+        _UpdateLocalVisibility();
+    }
+
+    const char* url = nullptr;
+    if (settings.FindString("baseUrl", &url) == B_OK)
+        fBaseUrlField->SetText(url);
+
+    const char* model = nullptr;
+    if (settings.FindString("model", &model) == B_OK)
+        fModelField->SetText(model);
+
+    const char* workDir = nullptr;
+    if (settings.FindString("workDir", &workDir) == B_OK)
+        fWorkDirField->SetText(workDir);
+}
+
+void
+LauncherWindow::_SaveSettings()
+{
+    BPath path;
+    if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK) return;
+    path.Append("HaiClaude");
+
+    BFile file(path.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+    if (file.InitCheck() != B_OK) return;
+
+    BMessage settings;
+    settings.AddBool("localMode", fLocalRadio->Value() == B_CONTROL_ON);
+    settings.AddString("baseUrl", fBaseUrlField->Text());
+    settings.AddString("model", fModelField->Text());
+    settings.AddString("workDir", fWorkDirField->Text());
+    settings.Flatten(&file);
 }

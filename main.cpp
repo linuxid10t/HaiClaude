@@ -11,6 +11,11 @@
 #include "LauncherWindow.h"
 
 #include <Application.h>
+#include <String.h>
+
+#include <unistd.h>
+
+BString gPendingExec;
 
 class HaiClaudeApp : public BApplication {
 public:
@@ -28,5 +33,10 @@ public:
 
 int main()
 {
-    return HaiClaudeApp().Run();
+    HaiClaudeApp().Run();
+
+    if (gPendingExec.Length() > 0)
+        execl("/bin/sh", "sh", "-c", gPendingExec.String(), (char*)nullptr);
+
+    return 0;
 }
