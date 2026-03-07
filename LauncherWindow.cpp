@@ -3,7 +3,9 @@
 #include "LauncherWindow.h"
 
 #include <Application.h>
+#include <Layout.h>
 #include <LayoutBuilder.h>
+#include <LayoutItem.h>
 #include <Message.h>
 #include <Messenger.h>
 #include <Rect.h>
@@ -31,6 +33,7 @@ LauncherWindow::LauncherWindow()
               B_TITLED_WINDOW,
               B_QUIT_ON_WINDOW_CLOSE | B_NOT_RESIZABLE | B_AUTO_UPDATE_SIZE_LIMITS)
 {
+    fIsApiMode = false;
     fCloudRadio = new BRadioButton("cloudRadio", "Cloud",
                                   new BMessage(MSG_MODE_CLOUD));
     fApiRadio   = new BRadioButton("apiRadio", "API  (API key)",
@@ -82,12 +85,6 @@ LauncherWindow::LauncherWindow()
     fApiHaikuModelField = new BTextControl("apiHaikuModel", "", "claude-haiku-4-20250514", nullptr);
     fApiHaikuModelField->SetDivider(0);
 
-    // Hide model fields by default
-    fApiCurrentModelField->Hide();
-    fApiOpusModelField->Hide();
-    fApiSonnetModelField->Hide();
-    fApiHaikuModelField->Hide();
-
     fApiBox = new BBox("apiBox");
     fApiBox->SetLabel("API Settings");
 
@@ -122,9 +119,12 @@ LauncherWindow::LauncherWindow()
         .AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
             .SetInsets(B_USE_DEFAULT_SPACING, 0, 0, 0)
             .Add(fCloudRadio)
-            .Add(fApiRadio)
             .End()
         .Add(fModelBox)
+        .AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
+            .SetInsets(B_USE_DEFAULT_SPACING, 0, 0, 0)
+            .Add(fApiRadio)
+            .End()
         .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING)
             .Add(fWorkDirField)
             .Add(fBrowseBtn, 0.0f)
@@ -134,13 +134,53 @@ LauncherWindow::LauncherWindow()
         .Add(fLaunchBtn)
         .End();
 
+    // Find layout items for dynamic visibility control via SetVisible()
+    fModelBoxItem = nullptr;
+    fApiBoxItem = nullptr;
+    BLayout* rootLayout = GetLayout();
+    for (int32 i = 0; i < rootLayout->CountItems(); i++) {
+        BLayoutItem* item = rootLayout->ItemAt(i);
+        if (item->View() == fModelBox)
+            fModelBoxItem = item;
+        else if (item->View() == fApiBox)
+            fApiBoxItem = item;
+    }
+
+    fApiCurrentModelFieldItem = nullptr;
+    fApiOpusModelFieldItem = nullptr;
+    fApiSonnetModelFieldItem = nullptr;
+    fApiHaikuModelFieldItem = nullptr;
+    BLayout* apiLayout = fApiBox->GetLayout();
+    for (int32 i = 0; i < apiLayout->CountItems(); i++) {
+        BLayoutItem* item = apiLayout->ItemAt(i);
+        BView* view = item->View();
+        if (view == fApiCurrentModelField)
+            fApiCurrentModelFieldItem = item;
+        else if (view == fApiOpusModelField)
+            fApiOpusModelFieldItem = item;
+        else if (view == fApiSonnetModelField)
+            fApiSonnetModelFieldItem = item;
+        else if (view == fApiHaikuModelField)
+            fApiHaikuModelFieldItem = item;
+    }
+
+    // Set initial visibility via layout items (not BView::Hide)
+    if (fApiCurrentModelFieldItem)
+        fApiCurrentModelFieldItem->SetVisible(false);
+    if (fApiOpusModelFieldItem)
+        fApiOpusModelFieldItem->SetVisible(false);
+    if (fApiSonnetModelFieldItem)
+        fApiSonnetModelFieldItem->SetVisible(false);
+    if (fApiHaikuModelFieldItem)
+        fApiHaikuModelFieldItem->SetVisible(false);
+
     InvalidateLayout(true);
     BSize preferred = GetLayout()->PreferredSize();
     ResizeTo(preferred.width, preferred.height);
     CenterOnScreen();
 
     _LoadSettings();
-    _UpdateModeVisibility();  // Ensure correct visibility based on mode
+    _UpdateModeVisibility();
 }
 
 LauncherWindow::~LauncherWindow()
@@ -166,39 +206,43 @@ LauncherWindow::MessageReceived(BMessage* msg)
             break;
         }
         case MSG_MODE_CLOUD:
+            fIsApiMode = false;
+            fCloudRadio->SetValue(B_CONTROL_ON);
+            fApiRadio->SetValue(B_CONTROL_OFF);
+            _UpdateModeVisibility();
+            break;
         case MSG_MODE_API:
+            fIsApiMode = true;
+            fApiRadio->SetValue(B_CONTROL_ON);
+            fCloudRadio->SetValue(B_CONTROL_OFF);
             _UpdateModeVisibility();
             break;
         case MSG_LAUNCH:
             _Launch();
             break;
         case MSG_API_CURRENT_MODEL:
-            if (fApiCurrentModelCheck->Value() == B_CONTROL_ON)
-                fApiCurrentModelField->Show();
-            else
-                fApiCurrentModelField->Hide();
-            _UpdateModeVisibility();
+            if (fApiCurrentModelFieldItem)
+                fApiCurrentModelFieldItem->SetVisible(
+                    fApiCurrentModelCheck->Value() == B_CONTROL_ON);
+            _ResizeToFit();
             break;
         case MSG_API_OPUS_MODEL:
-            if (fApiOpusModelCheck->Value() == B_CONTROL_ON)
-                fApiOpusModelField->Show();
-            else
-                fApiOpusModelField->Hide();
-            _UpdateModeVisibility();
+            if (fApiOpusModelFieldItem)
+                fApiOpusModelFieldItem->SetVisible(
+                    fApiOpusModelCheck->Value() == B_CONTROL_ON);
+            _ResizeToFit();
             break;
         case MSG_API_SONNET_MODEL:
-            if (fApiSonnetModelCheck->Value() == B_CONTROL_ON)
-                fApiSonnetModelField->Show();
-            else
-                fApiSonnetModelField->Hide();
-            _UpdateModeVisibility();
+            if (fApiSonnetModelFieldItem)
+                fApiSonnetModelFieldItem->SetVisible(
+                    fApiSonnetModelCheck->Value() == B_CONTROL_ON);
+            _ResizeToFit();
             break;
         case MSG_API_HAIKU_MODEL:
-            if (fApiHaikuModelCheck->Value() == B_CONTROL_ON)
-                fApiHaikuModelField->Show();
-            else
-                fApiHaikuModelField->Hide();
-            _UpdateModeVisibility();
+            if (fApiHaikuModelFieldItem)
+                fApiHaikuModelFieldItem->SetVisible(
+                    fApiHaikuModelCheck->Value() == B_CONTROL_ON);
+            _ResizeToFit();
             break;
         default:
             BWindow::MessageReceived(msg);
@@ -206,20 +250,23 @@ LauncherWindow::MessageReceived(BMessage* msg)
 }
 
 void
-LauncherWindow::_UpdateModeVisibility()
+LauncherWindow::_ResizeToFit()
 {
-    if (fApiRadio->Value() == B_CONTROL_ON) {
-        fModelBox->Hide();
-        fApiBox->Show();
-    } else {
-        fModelBox->Show();
-        fApiBox->Hide();
-    }
-
     InvalidateLayout(true);
     BSize preferred = GetLayout()->PreferredSize();
     SetSizeLimits(preferred.width, preferred.width, preferred.height, preferred.height);
     ResizeTo(preferred.width, preferred.height);
+}
+
+void
+LauncherWindow::_UpdateModeVisibility()
+{
+    if (fModelBoxItem)
+        fModelBoxItem->SetVisible(!fIsApiMode);
+    if (fApiBoxItem)
+        fApiBoxItem->SetVisible(fIsApiMode);
+
+    _ResizeToFit();
 }
 
 void
@@ -322,9 +369,9 @@ LauncherWindow::_LoadSettings()
     int32 mode = 0;  // 0=cloud, 1=api
     settings.FindInt32("mode", &mode);
     if (mode == 1) {
+        fIsApiMode = true;
         fApiRadio->SetValue(B_CONTROL_ON);
         fCloudRadio->SetValue(B_CONTROL_OFF);
-        _UpdateModeVisibility();
     }
 
     int32 cloudModel = 0;  // 0=opus, 1=sonnet, 2=haiku
@@ -352,10 +399,8 @@ LauncherWindow::_LoadSettings()
     bool currentModelCheck = false;
     if (settings.FindBool("apiCurrentModelCheck", &currentModelCheck) == B_OK) {
         fApiCurrentModelCheck->SetValue(currentModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
-        if (currentModelCheck)
-            fApiCurrentModelField->Show();
-        else
-            fApiCurrentModelField->Hide();
+        if (fApiCurrentModelFieldItem)
+            fApiCurrentModelFieldItem->SetVisible(currentModelCheck);
     }
 
     const char* apiCurrentModel = nullptr;
@@ -365,10 +410,8 @@ LauncherWindow::_LoadSettings()
     bool opusModelCheck = false;
     if (settings.FindBool("apiOpusModelCheck", &opusModelCheck) == B_OK) {
         fApiOpusModelCheck->SetValue(opusModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
-        if (opusModelCheck)
-            fApiOpusModelField->Show();
-        else
-            fApiOpusModelField->Hide();
+        if (fApiOpusModelFieldItem)
+            fApiOpusModelFieldItem->SetVisible(opusModelCheck);
     }
 
     const char* apiOpusModel = nullptr;
@@ -378,10 +421,8 @@ LauncherWindow::_LoadSettings()
     bool sonnetModelCheck = false;
     if (settings.FindBool("apiSonnetModelCheck", &sonnetModelCheck) == B_OK) {
         fApiSonnetModelCheck->SetValue(sonnetModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
-        if (sonnetModelCheck)
-            fApiSonnetModelField->Show();
-        else
-            fApiSonnetModelField->Hide();
+        if (fApiSonnetModelFieldItem)
+            fApiSonnetModelFieldItem->SetVisible(sonnetModelCheck);
     }
 
     const char* apiSonnetModel = nullptr;
@@ -391,10 +432,8 @@ LauncherWindow::_LoadSettings()
     bool haikuModelCheck = false;
     if (settings.FindBool("apiHaikuModelCheck", &haikuModelCheck) == B_OK) {
         fApiHaikuModelCheck->SetValue(haikuModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
-        if (haikuModelCheck)
-            fApiHaikuModelField->Show();
-        else
-            fApiHaikuModelField->Hide();
+        if (fApiHaikuModelFieldItem)
+            fApiHaikuModelFieldItem->SetVisible(haikuModelCheck);
     }
 
     const char* apiHaikuModel = nullptr;

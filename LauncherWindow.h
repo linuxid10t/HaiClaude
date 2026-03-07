@@ -9,6 +9,8 @@
 #include <TextControl.h>
 #include <Window.h>
 
+class BLayoutItem;
+
 extern BString gPendingExec;
 
 static const uint32 MSG_BROWSE_DIR           = 'mBRW';
@@ -28,6 +30,7 @@ public:
 
 private:
     void                _UpdateModeVisibility();
+    void                _ResizeToFit();
     void                _Launch();
     void                _LoadSettings();
     void                _SaveSettings();
@@ -53,4 +56,12 @@ private:
     BCheckBox*          fApiHaikuModelCheck;
     BTextControl*       fApiHaikuModelField;
     BButton*            fLaunchBtn;
+    bool                fIsApiMode;
+
+    BLayoutItem*        fModelBoxItem;
+    BLayoutItem*        fApiBoxItem;
+    BLayoutItem*        fApiCurrentModelFieldItem;
+    BLayoutItem*        fApiOpusModelFieldItem;
+    BLayoutItem*        fApiSonnetModelFieldItem;
+    BLayoutItem*        fApiHaikuModelFieldItem;
 };
