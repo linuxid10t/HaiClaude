@@ -138,8 +138,8 @@ InstallerWindow::MessageReceived(BMessage* msg)
             msg->FindBool("success", &success);
             msg->FindString("output", &output);
 
-            // Check if which found the claude binary
-            fClaudeInstalled = output.Length() > 0 && output.FindFirst("claude") >= 0;
+            // Check if the claude binary exists and is executable
+            fClaudeInstalled = output.FindFirst("found") >= 0;
 
             if (fClaudeInstalled) {
                 _LogAppend("Claude Code is already installed!\n");
@@ -223,7 +223,7 @@ InstallerWindow::_StartInstallation()
 void
 InstallerWindow::_CheckClaudeInstalled()
 {
-    _SpawnCommand("which claude 2>&1", MSG_CHECK_CLAUDE_DONE);
+    _SpawnCommand("test -x /boot/home/.npm-global/bin/claude && echo found 2>&1", MSG_CHECK_CLAUDE_DONE);
 }
 
 void

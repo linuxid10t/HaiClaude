@@ -33,7 +33,7 @@ Run the installer which will automatically check for and install Claude Code if 
 ```
 
 The installer will:
-1. Check if Claude Code is already installed
+1. Check if Claude Code is already installed (looks for `~/.npm-global/bin/claude`)
 2. Check if npm is available
 3. Install npm if needed (via `pkgman install npm`)
 4. Install Claude Code globally via npm
