@@ -9,19 +9,11 @@ Presents a small window with two launch modes and a working directory picker:
 
 - **Cloud** — launches `claude` in a Terminal (uses the user's
   `ANTHROPIC_API_KEY` from the environment).
-- **Local** — launches `claude` targeting a local OpenAI-compatible server
-  (Ollama, LM Studio, etc.). Sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY=ollama`,
-  and `CLAUDE_CONFIG_DIR=~/.claude-local` (isolated config dir so the stored
-  claude.ai oauth token doesn't conflict with the API key).
-  The **Model** text field is editable — type any model name directly.
-  A **Refresh** button fetches the server's model list via `GET <baseUrl>/models`,
-  populates a dropdown, and copies the first result into the text field.
-  Selecting a dropdown item updates the text field; the text field is the
-  single source of truth passed to `--model`.
-  The **Context tokens** field sets the model's context window size. It is
-  injected as `OLLAMA_NUM_CTX` and `LM_STUDIO_NUM_CTX` environment variables
-  so both Ollama and LM Studio pick it up. The minimum is 32768 (values below
-  this are clamped at launch time). The value is saved across sessions.
+- **API** — launches `claude` with custom API settings. Allows overriding
+  `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`, and setting per-model overrides
+  for `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, and
+  `ANTHROPIC_DEFAULT_HAIKU_MODEL`. Also allows selecting a specific model to pass
+  to `--model`. The API URL and key are saved across sessions.
 - **Working directory** — a persistent text field (with a **Browse…** button
   that opens a directory panel) sets the directory Claude Code starts in.
   If non-empty, the launch command is prefixed with `cd '<dir>' &&`.
@@ -42,16 +34,10 @@ make
 ./haiclaude
 ```
 
-Requires Haiku with `libnetservices2` (present in R1β5+).
-Links: `-lbe -lroot -lnetservices2 -lbnetapi -ltracker`
+Requires Haiku R1.0 or later.
+Links: `-lbe -lroot -ltracker`
 
 ## Key implementation notes
-
-- **HTTP fetch** runs on a background thread (`spawn_thread`) using
-  `BPrivate::Network::BHttpSession`. Results are posted back to the
-  window as `MSG_MODELS_READY` via `BMessenger`.
-- **JSON parsing** is a simple `strstr` loop scanning for `"id":"…"` —
-  no JSON library.
 - **Show/Hide resize** requires `InvalidateLayout(true)` +
   `SetSizeLimits(w,w,h,h)` before `ResizeTo`, because
   `B_AUTO_UPDATE_SIZE_LIMITS` caches stale limits.
