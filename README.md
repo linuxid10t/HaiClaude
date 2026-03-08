@@ -63,6 +63,16 @@ If you prefer to install Claude Code manually:
 1. Install npm: `pkgman install npm`
 2. Install Claude Code: `npm install -g @anthropic-ai/claude-code`
 
+## Usage
+
+Run the launcher:
+
+```sh
+./haiclaude
+```
+
+Select your preferred mode (Cloud or API), choose a model, pick a working directory, and click **Launch**.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
