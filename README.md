@@ -30,7 +30,7 @@ make
 ./haiclaude
 ```
 
-Links against: `-lbe -lroot -lbnetapi -ltracker`
+Links against: `-lbe -lroot -ltracker`
 
 ## Install
 
