@@ -21,20 +21,40 @@ Native Haiku GUI launcher for [Claude Code](https://docs.anthropic.com/en/docs/c
 ## Requirements
 
 - Haiku R1β5 or later
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed at `/boot/home/.npm-global/bin/claude`
+
+## Installation
+
+### Using the Installer
+
+Run the installer which will automatically check for and install Claude Code if needed:
+
+```sh
+./haiclaude-installer
+```
+
+The installer will:
+1. Check if Claude Code is already installed
+2. Check if npm is available
+3. Install npm if needed (via `pkgman install npm`)
+4. Install Claude Code globally via npm
+5. Set up the `claude` binary at `~/.npm-global/bin/claude`
+
+### Manual Installation
+
+If you prefer to install manually:
+
+1. Install npm: `pkgman install npm`
+2. Install Claude Code: `npm install -g @anthropic-ai/claude-code`
+3. Build and run the launcher
 
 ## Build
 
 ```sh
-make
-./haiclaude
+make              # build launcher (haiclaude)
+make installer    # build installer (haiclaude-installer)
 ```
 
 Links against: `-lbe -lroot -ltracker`
-
-## Install
-
-Copy the `haiclaude` binary anywhere on your path, or add it to the Deskbar.
 
 ## License
 
