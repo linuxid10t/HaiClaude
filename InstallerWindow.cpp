@@ -145,9 +145,9 @@ InstallerWindow::MessageReceived(BMessage* msg)
                 _LogAppend("Claude Code is already installed!\n");
                 _SetState(StateSuccess);
             } else {
-                _LogAppend("Claude Code not found. Checking for npm...\n");
-                _SetState(StateCheckingNpm);
-                _CheckNpmInstalled();
+                _LogAppend("Claude Code not found. Installing...\n");
+                _SetState(StateInstallingClaude);
+                _InstallClaude();
             }
             break;
         }
@@ -162,9 +162,9 @@ InstallerWindow::MessageReceived(BMessage* msg)
             fNpmInstalled = output.Length() > 0 && output.FindFirst("npm") >= 0;
 
             if (fNpmInstalled) {
-                _LogAppend("npm is installed. Installing Claude Code...\n");
-                _SetState(StateInstallingClaude);
-                _InstallClaude();
+                _LogAppend("npm is installed. Checking for Claude Code...\n");
+                _SetState(StateCheckingClaude);
+                _CheckClaudeInstalled();
             } else {
                 _LogAppend("npm not found. Installing npm via pkgman...\n");
                 _SetState(StateInstallingNpm);
@@ -178,9 +178,9 @@ InstallerWindow::MessageReceived(BMessage* msg)
             msg->FindBool("success", &success);
 
             if (success) {
-                _LogAppend("npm installed successfully. Installing Claude Code...\n");
-                _SetState(StateInstallingClaude);
-                _InstallClaude();
+                _LogAppend("npm installed successfully. Checking for Claude Code...\n");
+                _SetState(StateCheckingClaude);
+                _CheckClaudeInstalled();
             } else {
                 _LogAppend("Failed to install npm. Please check your internet connection.\n");
                 _SetState(StateError);
@@ -214,10 +214,10 @@ InstallerWindow::_StartInstallation()
     fInstallBtn->SetEnabled(false);
     fLogView->SetText("");
     _LogAppend("Starting installation...\n");
-    _LogAppend("Checking if Claude Code is already installed...\n");
+    _LogAppend("Checking for npm...\n");
 
-    _SetState(StateCheckingClaude);
-    _CheckClaudeInstalled();
+    _SetState(StateCheckingNpm);
+    _CheckNpmInstalled();
 }
 
 void
