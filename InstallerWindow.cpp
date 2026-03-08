@@ -158,8 +158,8 @@ InstallerWindow::MessageReceived(BMessage* msg)
             msg->FindBool("success", &success);
             msg->FindString("output", &output);
 
-            // Check if npm path was found
-            fNpmInstalled = output.Length() > 0 && output.FindFirst("npm") >= 0;
+            // which returns 0 if found, non-zero if not
+            fNpmInstalled = success;
 
             if (fNpmInstalled) {
                 _LogAppend("npm is installed. Checking for Claude Code...\n");
