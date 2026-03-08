@@ -241,7 +241,11 @@ InstallerWindow::_InstallNpm()
 void
 InstallerWindow::_InstallClaude()
 {
-    _SpawnCommand("npm install -g @anthropic-ai/claude-code 2>&1", MSG_INSTALL_CLAUDE_DONE);
+    // Configure npm to use a user-writable directory and install claude-code
+    // This avoids permission issues with system directories
+    _SpawnCommand("mkdir -p /boot/home/.npm-global && "
+                  "npm config set prefix /boot/home/.npm-global && "
+                  "npm install -g @anthropic-ai/claude-code 2>&1", MSG_INSTALL_CLAUDE_DONE);
 }
 
 void
