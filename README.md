@@ -21,6 +21,9 @@ Native Haiku GUI launcher for [Claude Code](https://docs.anthropic.com/en/docs/c
 ## Requirements
 
 - Haiku R1β5 or later
+- **64-bit Haiku** required for the installer (npm packages are 64-bit only)
+- The launcher itself works on 32-bit Haiku if Claude Code is already installed
+- **GCC 13+** required when building for 32-bit
 
 ## Installation
 
