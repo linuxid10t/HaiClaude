@@ -50,8 +50,13 @@ If you prefer to install manually:
 ## Build
 
 ```sh
-make              # build launcher (haiclaude)
-make installer    # build installer (haiclaude-installer)
+make              # build both launcher and installer
+```
+
+Or build individually:
+```sh
+make haiclaude            # build launcher only
+make haiclaude-installer  # build installer only
 ```
 
 Links against: `-lbe -lroot -ltracker`

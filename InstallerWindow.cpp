@@ -138,8 +138,8 @@ InstallerWindow::MessageReceived(BMessage* msg)
             msg->FindBool("success", &success);
             msg->FindString("output", &output);
 
-            // Check if output contains claude-code version
-            fClaudeInstalled = output.FindFirst("@anthropic-ai/claude-code@") >= 0;
+            // Check if which found the claude binary
+            fClaudeInstalled = output.Length() > 0 && output.FindFirst("claude") >= 0;
 
             if (fClaudeInstalled) {
                 _LogAppend("Claude Code is already installed!\n");
@@ -223,7 +223,7 @@ InstallerWindow::_StartInstallation()
 void
 InstallerWindow::_CheckClaudeInstalled()
 {
-    _SpawnCommand("npm list -g @anthropic-ai/claude-code 2>&1", MSG_CHECK_CLAUDE_DONE);
+    _SpawnCommand("which claude 2>&1", MSG_CHECK_CLAUDE_DONE);
 }
 
 void

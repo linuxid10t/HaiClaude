@@ -17,7 +17,7 @@ INSTALLER_OBJS   = $(INSTALLER_SRCS:.cpp=.o)
 
 .PHONY: all clean installer
 
-all: $(TARGET)
+all: $(TARGET) $(INSTALLER_TARGET)
 
 installer: $(INSTALLER_TARGET)
 
