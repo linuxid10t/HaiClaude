@@ -47,6 +47,7 @@ private:
     BBox*               fApiBox;
     BTextControl*       fApiUrlField;
     BTextControl*       fApiKeyField;
+    BCheckBox*          fSaveApiKeyCheck;
     BCheckBox*          fApiCurrentModelCheck;
     BTextControl*       fApiCurrentModelField;
     BCheckBox*          fApiOpusModelCheck;

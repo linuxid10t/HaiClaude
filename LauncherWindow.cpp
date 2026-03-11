@@ -16,12 +16,26 @@
 #include <FindDirectory.h>
 #include <File.h>
 #include <Path.h>
+#include <Alert.h>
 
 #include <cstring>
 #include <unistd.h>
 
 static const char* kClaudeBin   = "/boot/home/.npm-global/bin/claude";
 static const char* kTerminalSig = "application/x-vnd.Haiku-Terminal";
+
+// ---------------------------------------------------------------------------
+// Helper: Shell Escape - prevents shell injection by escaping single quotes
+// ---------------------------------------------------------------------------
+
+static BString shellEscape(const BString& s)
+{
+    BString result = "'";
+    BString escaped = s;
+    escaped.ReplaceAll("'", "'\\''");
+    result << escaped << "'";
+    return result;
+}
 
 // ---------------------------------------------------------------------------
 // LauncherWindow
@@ -65,6 +79,8 @@ LauncherWindow::LauncherWindow()
     fApiKeyField->SetDivider(70);
     fApiKeyField->TextView()->HideTyping(true);
 
+    fSaveApiKeyCheck = new BCheckBox("saveApiKeyCheck", "Remember key", nullptr);
+
     fApiCurrentModelCheck = new BCheckBox("apiCurrentModelCheck", "Override current model",
                                           new BMessage(MSG_API_CURRENT_MODEL));
     fApiCurrentModelField = new BTextControl("apiCurrentModel", "", "claude-sonnet-4-6", nullptr);
@@ -93,6 +109,7 @@ LauncherWindow::LauncherWindow()
                    B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING)
         .Add(fApiUrlField)
         .Add(fApiKeyField)
+        .Add(fSaveApiKeyCheck)
         .Add(fApiCurrentModelCheck)
         .Add(fApiCurrentModelField)
         .Add(fApiOpusModelCheck)
@@ -272,11 +289,43 @@ LauncherWindow::_UpdateModeVisibility()
 void
 LauncherWindow::_Launch()
 {
-    // Build the shell command
+    // Validate working directory
     BString workDir = fWorkDirField->Text();
+    if (workDir.Length() > 0) {
+        BEntry entry(workDir);
+        if (!entry.Exists() || !entry.IsDirectory()) {
+            BAlert* alert = new BAlert("Invalid Directory",
+                "The specified working directory does not exist.", "OK");
+            alert->SetFlags(alert->Flags(), B_CLOSE_ON_ESCAPE);
+            alert->Go();
+            return;
+        }
+    }
+
+    // Validate API fields if in API mode
+    if (fApiRadio->Value() == B_CONTROL_ON) {
+        BString apiUrl = fApiUrlField->Text();
+        if (apiUrl.Length() == 0) {
+            BAlert* alert = new BAlert("Missing API URL",
+                "API URL cannot be empty.", "OK");
+            alert->SetFlags(alert->Flags(), B_CLOSE_ON_ESCAPE);
+            alert->Go();
+            return;
+        }
+        BString apiKey = fApiKeyField->Text();
+        if (apiKey.Length() == 0) {
+            BAlert* alert = new BAlert("Missing API Key",
+                "API Key cannot be empty.", "OK");
+            alert->SetFlags(alert->Flags(), B_CLOSE_ON_ESCAPE);
+            alert->Go();
+            return;
+        }
+    }
+
+    // Build the shell command
     BString cmd;
-    if (strlen(workDir) > 0)
-        cmd << "cd '" << workDir << "' && ";
+    if (workDir.Length() > 0)
+        cmd << "cd " << shellEscape(workDir) << " && ";
 
     if (fCloudRadio->Value() == B_CONTROL_ON) {
         // Unset API key to avoid conflict with claude.ai OAuth token
@@ -292,25 +341,26 @@ LauncherWindow::_Launch()
     } else if (fApiRadio->Value() == B_CONTROL_ON) {
         BString apiUrl = fApiUrlField->Text();
         BString apiKey = fApiKeyField->Text();
-        // Temporarily move credentials aside, run with API key, then restore
-        cmd << "mv \"$HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json.bak\" 2>/dev/null; "
-            << "ANTHROPIC_BASE_URL='" << apiUrl << "'"
-            << " ANTHROPIC_API_KEY='" << apiKey << "'";
+        // Use trap to guarantee credentials are restored on exit (even if claude crashes)
+        cmd << "trap 'mv \"$HOME/.claude/.credentials.json.bak\" \"$HOME/.claude/.credentials.json\" 2>/dev/null' EXIT; "
+            << "mv \"$HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json.bak\" 2>/dev/null; "
+            << "ANTHROPIC_BASE_URL=" << shellEscape(apiUrl)
+            << " ANTHROPIC_API_KEY=" << shellEscape(apiKey);
 
         if (fApiOpusModelCheck->Value() == B_CONTROL_ON) {
             BString opusModel = fApiOpusModelField->Text();
             if (opusModel.Length() > 0)
-                cmd << " ANTHROPIC_DEFAULT_OPUS_MODEL='" << opusModel << "'";
+                cmd << " ANTHROPIC_DEFAULT_OPUS_MODEL=" << shellEscape(opusModel);
         }
         if (fApiSonnetModelCheck->Value() == B_CONTROL_ON) {
             BString sonnetModel = fApiSonnetModelField->Text();
             if (sonnetModel.Length() > 0)
-                cmd << " ANTHROPIC_DEFAULT_SONNET_MODEL='" << sonnetModel << "'";
+                cmd << " ANTHROPIC_DEFAULT_SONNET_MODEL=" << shellEscape(sonnetModel);
         }
         if (fApiHaikuModelCheck->Value() == B_CONTROL_ON) {
             BString haikuModel = fApiHaikuModelField->Text();
             if (haikuModel.Length() > 0)
-                cmd << " ANTHROPIC_DEFAULT_HAIKU_MODEL='" << haikuModel << "'";
+                cmd << " ANTHROPIC_DEFAULT_HAIKU_MODEL=" << shellEscape(haikuModel);
         }
 
         cmd << " " << kClaudeBin;
@@ -318,11 +368,8 @@ LauncherWindow::_Launch()
         if (fApiCurrentModelCheck->Value() == B_CONTROL_ON) {
             BString currentModel = fApiCurrentModelField->Text();
             if (currentModel.Length() > 0)
-                cmd << " --model '" << currentModel << "'";
+                cmd << " --model " << shellEscape(currentModel);
         }
-
-        // After claude exits, restore credentials
-        cmd << "; mv \"$HOME/.claude/.credentials.json.bak\" \"$HOME/.claude/.credentials.json\" 2>/dev/null";
     }
 
     _SaveSettings();
@@ -392,9 +439,15 @@ LauncherWindow::_LoadSettings()
     if (settings.FindString("apiUrl", &apiUrl) == B_OK)
         fApiUrlField->SetText(apiUrl);
 
-    const char* apiKey = nullptr;
-    if (settings.FindString("apiKey", &apiKey) == B_OK)
-        fApiKeyField->SetText(apiKey);
+    // Only load API key if saveApiKey is true
+    bool saveApiKey = false;
+    if (settings.FindBool("saveApiKey", &saveApiKey) == B_OK)
+        fSaveApiKeyCheck->SetValue(saveApiKey ? B_CONTROL_ON : B_CONTROL_OFF);
+    if (saveApiKey) {
+        const char* apiKey = nullptr;
+        if (settings.FindString("apiKey", &apiKey) == B_OK)
+            fApiKeyField->SetText(apiKey);
+    }
 
     bool currentModelCheck = false;
     if (settings.FindBool("apiCurrentModelCheck", &currentModelCheck) == B_OK) {
@@ -466,7 +519,13 @@ LauncherWindow::_SaveSettings()
     settings.AddInt32("cloudModel", cloudModel);
     settings.AddString("workDir", fWorkDirField->Text());
     settings.AddString("apiUrl", fApiUrlField->Text());
-    settings.AddString("apiKey", fApiKeyField->Text());
+
+    // Only save API key if checkbox is checked
+    bool saveApiKey = fSaveApiKeyCheck->Value() == B_CONTROL_ON;
+    settings.AddBool("saveApiKey", saveApiKey);
+    if (saveApiKey)
+        settings.AddString("apiKey", fApiKeyField->Text());
+
     settings.AddBool("apiCurrentModelCheck", fApiCurrentModelCheck->Value() == B_CONTROL_ON);
     settings.AddString("apiCurrentModel", fApiCurrentModelField->Text());
     settings.AddBool("apiOpusModelCheck", fApiOpusModelCheck->Value() == B_CONTROL_ON);

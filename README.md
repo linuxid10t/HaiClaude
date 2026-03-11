@@ -9,6 +9,7 @@ Native Haiku GUI launcher for [Claude Code](https://docs.anthropic.com/en/docs/c
 - **API mode** — launches Claude Code with a custom API configuration:
   - **API URL** — defaults to Anthropic's API, but can be changed for proxies or alternative endpoints
   - **API Key** — your Anthropic API key (input is masked)
+  - **Remember key** — opt-in checkbox to save the API key to disk
   - **Model overrides** — optionally override the default Opus, Sonnet, and Haiku model versions
   - **Current model override** — force a specific model via `--model`
 - **Working directory** picker — persistent text field with a **Browse…** button; Claude Code starts in the chosen directory
@@ -72,6 +73,13 @@ Run the launcher:
 ```
 
 Select your preferred mode (Cloud or API), choose a model, pick a working directory, and click **Launch**.
+
+## Security Notes
+
+- **API key storage is opt-in** — the key is only saved to disk if you check "Remember key"
+- **Shell injection protection** — all user input is properly escaped before use in shell commands
+- **Input validation** — working directory must exist; API fields cannot be empty
+- **Credentials backup** — in API mode, existing credentials are backed up and restored automatically (using shell `trap` to guarantee restoration even on crash)
 
 ## License
 
