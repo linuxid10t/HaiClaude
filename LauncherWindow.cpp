@@ -296,7 +296,7 @@ LauncherWindow::_Launch()
         if (!entry.Exists() || !entry.IsDirectory()) {
             BAlert* alert = new BAlert("Invalid Directory",
                 "The specified working directory does not exist.", "OK");
-            alert->SetFlags(alert->Flags(), B_CLOSE_ON_ESCAPE);
+            alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
             alert->Go();
             return;
         }
@@ -308,7 +308,7 @@ LauncherWindow::_Launch()
         if (apiUrl.Length() == 0) {
             BAlert* alert = new BAlert("Missing API URL",
                 "API URL cannot be empty.", "OK");
-            alert->SetFlags(alert->Flags(), B_CLOSE_ON_ESCAPE);
+            alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
             alert->Go();
             return;
         }
@@ -316,7 +316,7 @@ LauncherWindow::_Launch()
         if (apiKey.Length() == 0) {
             BAlert* alert = new BAlert("Missing API Key",
                 "API Key cannot be empty.", "OK");
-            alert->SetFlags(alert->Flags(), B_CLOSE_ON_ESCAPE);
+            alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
             alert->Go();
             return;
         }
