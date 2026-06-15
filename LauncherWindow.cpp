@@ -3,31 +3,39 @@
 #include "LauncherWindow.h"
 
 #include <Application.h>
+#include <Directory.h>
+#include <Entry.h>
+#include <File.h>
+#include <FindDirectory.h>
 #include <Layout.h>
 #include <LayoutBuilder.h>
 #include <LayoutItem.h>
 #include <Message.h>
+#include <MenuItem.h>
 #include <Messenger.h>
+#include <Path.h>
 #include <Rect.h>
 #include <Roster.h>
 #include <String.h>
-
-#include <Entry.h>
-#include <FindDirectory.h>
-#include <File.h>
-#include <Path.h>
+#include <StringItem.h>
 #include <Alert.h>
 
 #include <cstring>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static const char* kClaudeBin   = "/boot/home/.npm-global/bin/claude";
 static const char* kTerminalSig = "application/x-vnd.Haiku-Terminal";
 
-// ---------------------------------------------------------------------------
-// Helper: Shell Escape - prevents shell injection by escaping single quotes
-// ---------------------------------------------------------------------------
+// Build a profile settings key: "profile_<name>_<suffix>"
+static BString pkey(const BString& pfx, const char* suffix)
+{
+    BString k(pfx);
+    k.Append(suffix);
+    return k;
+}
 
+// Shell escaping: wrap in single quotes, escape internal single quotes
 static BString shellEscape(const BString& s)
 {
     BString result = "'";
@@ -38,7 +46,7 @@ static BString shellEscape(const BString& s)
 }
 
 // ---------------------------------------------------------------------------
-// LauncherWindow
+// Constructor
 // ---------------------------------------------------------------------------
 
 LauncherWindow::LauncherWindow()
@@ -48,16 +56,16 @@ LauncherWindow::LauncherWindow()
               B_QUIT_ON_WINDOW_CLOSE | B_NOT_RESIZABLE | B_AUTO_UPDATE_SIZE_LIMITS)
 {
     fIsApiMode = false;
-    fCloudRadio = new BRadioButton("cloudRadio", "Cloud",
-                                  new BMessage(MSG_MODE_CLOUD));
-    fApiRadio   = new BRadioButton("apiRadio", "API  (API key)",
-                                  new BMessage(MSG_MODE_API));
+
+    // Mode selection
+    fCloudRadio = new BRadioButton("cloudRadio", "Cloud", new BMessage(MSG_MODE_CLOUD));
+    fApiRadio   = new BRadioButton("apiRadio", "API  (API key)", new BMessage(MSG_MODE_API));
     fCloudRadio->SetValue(B_CONTROL_ON);
 
-    // Model selection radio buttons in their own BBox (separate radio group)
-    fCloudOpusRadio = new BRadioButton("cloudOpus", "Opus", nullptr);
+    // Cloud model box (visible in Cloud mode only)
+    fCloudOpusRadio   = new BRadioButton("cloudOpus",   "Opus",   nullptr);
     fCloudSonnetRadio = new BRadioButton("cloudSonnet", "Sonnet", nullptr);
-    fCloudHaikuRadio = new BRadioButton("cloudHaiku", "Haiku", nullptr);
+    fCloudHaikuRadio  = new BRadioButton("cloudHaiku",  "Haiku",  nullptr);
     fCloudOpusRadio->SetValue(B_CONTROL_ON);
 
     fModelBox = new BBox("modelBox");
@@ -70,7 +78,19 @@ LauncherWindow::LauncherWindow()
         .Add(fCloudHaikuRadio)
         .End();
 
-    // API mode controls
+    // Working directory
+    fWorkDirField = new BTextControl("workDir", "Directory:", "/boot/home", nullptr);
+    fWorkDirField->SetDivider(70);
+    fBrowseBtn = new BButton("browse", "Browse\xe2\x80\xa6", new BMessage(MSG_BROWSE_DIR));
+    fFilePanel = new BFilePanel(B_OPEN_PANEL, new BMessenger(this), nullptr,
+                                B_DIRECTORY_NODE, false);
+
+    // YOLO mode (visible in both Cloud and API modes)
+    fYoloCheck = new BCheckBox("yoloCheck",
+        "YOLO mode \xe2\x80\x94 skip all permissions (Claude executes without asking)",
+        nullptr);
+
+    // API settings controls
     fApiUrlField = new BTextControl("apiUrl", "API URL:",
                                     "https://api.anthropic.com/v1", nullptr);
     fApiUrlField->SetDivider(70);
@@ -81,29 +101,36 @@ LauncherWindow::LauncherWindow()
 
     fSaveApiKeyCheck = new BCheckBox("saveApiKeyCheck", "Remember key", nullptr);
 
-    fApiCurrentModelCheck = new BCheckBox("apiCurrentModelCheck", "Override current model",
-                                          new BMessage(MSG_API_CURRENT_MODEL));
-    fApiCurrentModelField = new BTextControl("apiCurrentModel", "", "claude-sonnet-4-6", nullptr);
+    fApiCurrentModelCheck = new BCheckBox("apiCurrentModelCheck",
+        "Override current model", new BMessage(MSG_API_CURRENT_MODEL));
+    fApiCurrentModelField = new BTextControl("apiCurrentModel", "",
+        "claude-sonnet-4-6", nullptr);
     fApiCurrentModelField->SetDivider(0);
 
-    fApiOpusModelCheck = new BCheckBox("apiOpusModelCheck", "Override ANTHROPIC_DEFAULT_OPUS_MODEL",
-                                       new BMessage(MSG_API_OPUS_MODEL));
-    fApiOpusModelField = new BTextControl("apiOpusModel", "", "claude-opus-4-20250514", nullptr);
+    fApiOpusModelCheck = new BCheckBox("apiOpusModelCheck",
+        "Override ANTHROPIC_DEFAULT_OPUS_MODEL", new BMessage(MSG_API_OPUS_MODEL));
+    fApiOpusModelField = new BTextControl("apiOpusModel", "",
+        "claude-opus-4-20250514", nullptr);
     fApiOpusModelField->SetDivider(0);
 
-    fApiSonnetModelCheck = new BCheckBox("apiSonnetModelCheck", "Override ANTHROPIC_DEFAULT_SONNET_MODEL",
-                                         new BMessage(MSG_API_SONNET_MODEL));
-    fApiSonnetModelField = new BTextControl("apiSonnetModel", "", "claude-sonnet-4-6", nullptr);
+    fApiSonnetModelCheck = new BCheckBox("apiSonnetModelCheck",
+        "Override ANTHROPIC_DEFAULT_SONNET_MODEL", new BMessage(MSG_API_SONNET_MODEL));
+    fApiSonnetModelField = new BTextControl("apiSonnetModel", "",
+        "claude-sonnet-4-6", nullptr);
     fApiSonnetModelField->SetDivider(0);
 
-    fApiHaikuModelCheck = new BCheckBox("apiHaikuModelCheck", "Override ANTHROPIC_DEFAULT_HAIKU_MODEL",
-                                        new BMessage(MSG_API_HAIKU_MODEL));
-    fApiHaikuModelField = new BTextControl("apiHaikuModel", "", "claude-haiku-4-20250514", nullptr);
+    fApiHaikuModelCheck = new BCheckBox("apiHaikuModelCheck",
+        "Override ANTHROPIC_DEFAULT_HAIKU_MODEL", new BMessage(MSG_API_HAIKU_MODEL));
+    fApiHaikuModelField = new BTextControl("apiHaikuModel", "",
+        "claude-haiku-4-20250514", nullptr);
     fApiHaikuModelField->SetDivider(0);
+
+    // Attribution fix: disables header that slows local LLMs by ~90%
+    fFixAttributionCheck = new BCheckBox("fixAttributionCheck",
+        "Fix attribution header (for local LLMs)", nullptr);
 
     fApiBox = new BBox("apiBox");
     fApiBox->SetLabel("API Settings");
-
     BLayoutBuilder::Group<>(fApiBox, B_VERTICAL, B_USE_SMALL_SPACING)
         .SetInsets(B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING,
                    B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING)
@@ -118,14 +145,47 @@ LauncherWindow::LauncherWindow()
         .Add(fApiSonnetModelField)
         .Add(fApiHaikuModelCheck)
         .Add(fApiHaikuModelField)
+        .Add(fFixAttributionCheck)
         .End();
 
-    fWorkDirField = new BTextControl("workDir", "Directory:", "/boot/home", nullptr);
-    fWorkDirField->SetDivider(70);
-    fBrowseBtn = new BButton("browse", "Browse\xe2\x80\xa6", new BMessage(MSG_BROWSE_DIR));
+    // Profile management box (visible in API mode only)
+    fProfileMenu = new BPopUpMenu("Select profile...");
+    fProfileCombo = new BMenuField("profileCombo", "Profile:", fProfileMenu);
+    fProfileCombo->SetDivider(55);
 
-    fFilePanel = new BFilePanel(B_OPEN_PANEL, new BMessenger(this), nullptr,
-                                B_DIRECTORY_NODE, false);
+    fProfileNameField = new BTextControl("profileName", "New profile:", "", nullptr);
+    fProfileNameField->SetDivider(80);
+    fProfileNameField->TextView()->SetMaxBytes(64);
+
+    fSaveProfileBtn = new BButton("saveProfile", "Save Profile",
+                                  new BMessage(MSG_SAVE_PROFILE));
+
+    fProfileListView = new BListView("profileList");
+    fProfileListView->SetSelectionMessage(new BMessage(MSG_PROFILE_LIST_SEL));
+    fProfileListScroll = new BScrollView("profileScroll", fProfileListView,
+                                         0, false, true);
+    fProfileListScroll->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, 130));
+
+    fDeleteProfileBtn = new BButton("deleteProfile", "Delete Profile",
+                                    new BMessage(MSG_DELETE_PROFILE));
+    fDeleteProfileBtn->SetEnabled(false);
+
+    fProfileBox = new BBox("profileBox");
+    fProfileBox->SetLabel("Profiles");
+    BLayoutBuilder::Group<>(fProfileBox, B_VERTICAL, B_USE_SMALL_SPACING)
+        .SetInsets(B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING,
+                   B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING)
+        .Add(fProfileCombo)
+        .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING)
+            .Add(fProfileNameField)
+            .Add(fSaveProfileBtn, 0.0f)
+            .End()
+        .Add(fProfileListScroll)
+        .AddGroup(B_HORIZONTAL, 0)
+            .AddGlue()
+            .Add(fDeleteProfileBtn, 0.0f)
+            .End()
+        .End();
 
     fLaunchBtn = new BButton("launchBtn", "Launch Claude Code", new BMessage(MSG_LAUNCH));
     fLaunchBtn->MakeDefault(true);
@@ -146,14 +206,17 @@ LauncherWindow::LauncherWindow()
             .Add(fWorkDirField)
             .Add(fBrowseBtn, 0.0f)
             .End()
+        .Add(fYoloCheck)
         .Add(fApiBox)
+        .Add(fProfileBox)
         .AddGlue()
         .Add(fLaunchBtn)
         .End();
 
-    // Find layout items for dynamic visibility control via SetVisible()
-    fModelBoxItem = nullptr;
-    fApiBoxItem = nullptr;
+    // Find root-level layout items for dynamic visibility
+    fModelBoxItem   = nullptr;
+    fApiBoxItem     = nullptr;
+    fProfileBoxItem = nullptr;
     BLayout* rootLayout = GetLayout();
     for (int32 i = 0; i < rootLayout->CountItems(); i++) {
         BLayoutItem* item = rootLayout->ItemAt(i);
@@ -161,12 +224,15 @@ LauncherWindow::LauncherWindow()
             fModelBoxItem = item;
         else if (item->View() == fApiBox)
             fApiBoxItem = item;
+        else if (item->View() == fProfileBox)
+            fProfileBoxItem = item;
     }
 
+    // Find API box child items for override field visibility
     fApiCurrentModelFieldItem = nullptr;
-    fApiOpusModelFieldItem = nullptr;
-    fApiSonnetModelFieldItem = nullptr;
-    fApiHaikuModelFieldItem = nullptr;
+    fApiOpusModelFieldItem    = nullptr;
+    fApiSonnetModelFieldItem  = nullptr;
+    fApiHaikuModelFieldItem   = nullptr;
     BLayout* apiLayout = fApiBox->GetLayout();
     for (int32 i = 0; i < apiLayout->CountItems(); i++) {
         BLayoutItem* item = apiLayout->ItemAt(i);
@@ -181,15 +247,11 @@ LauncherWindow::LauncherWindow()
             fApiHaikuModelFieldItem = item;
     }
 
-    // Set initial visibility via layout items (not BView::Hide)
-    if (fApiCurrentModelFieldItem)
-        fApiCurrentModelFieldItem->SetVisible(false);
-    if (fApiOpusModelFieldItem)
-        fApiOpusModelFieldItem->SetVisible(false);
-    if (fApiSonnetModelFieldItem)
-        fApiSonnetModelFieldItem->SetVisible(false);
-    if (fApiHaikuModelFieldItem)
-        fApiHaikuModelFieldItem->SetVisible(false);
+    // Hide model override fields initially
+    if (fApiCurrentModelFieldItem) fApiCurrentModelFieldItem->SetVisible(false);
+    if (fApiOpusModelFieldItem)    fApiOpusModelFieldItem->SetVisible(false);
+    if (fApiSonnetModelFieldItem)  fApiSonnetModelFieldItem->SetVisible(false);
+    if (fApiHaikuModelFieldItem)   fApiHaikuModelFieldItem->SetVisible(false);
 
     InvalidateLayout(true);
     BSize preferred = GetLayout()->PreferredSize();
@@ -197,6 +259,7 @@ LauncherWindow::LauncherWindow()
     CenterOnScreen();
 
     _LoadSettings();
+    _LoadProfiles();
     _UpdateModeVisibility();
 }
 
@@ -204,6 +267,10 @@ LauncherWindow::~LauncherWindow()
 {
     delete fFilePanel;
 }
+
+// ---------------------------------------------------------------------------
+// MessageReceived
+// ---------------------------------------------------------------------------
 
 void
 LauncherWindow::MessageReceived(BMessage* msg)
@@ -261,10 +328,33 @@ LauncherWindow::MessageReceived(BMessage* msg)
                     fApiHaikuModelCheck->Value() == B_CONTROL_ON);
             _ResizeToFit();
             break;
+        case MSG_PROFILE_SELECTED: {
+            const char* name;
+            if (msg->FindString("name", &name) == B_OK) {
+                fActiveProfile = name;
+                _LoadProfileIntoUI(name);
+                _ResizeToFit();
+            }
+            break;
+        }
+        case MSG_PROFILE_LIST_SEL:
+            fDeleteProfileBtn->SetEnabled(
+                fProfileListView->CurrentSelection() >= 0);
+            break;
+        case MSG_SAVE_PROFILE:
+            _SaveProfile();
+            break;
+        case MSG_DELETE_PROFILE:
+            _DeleteProfile();
+            break;
         default:
             BWindow::MessageReceived(msg);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Layout helpers
+// ---------------------------------------------------------------------------
 
 void
 LauncherWindow::_ResizeToFit()
@@ -282,9 +372,15 @@ LauncherWindow::_UpdateModeVisibility()
         fModelBoxItem->SetVisible(!fIsApiMode);
     if (fApiBoxItem)
         fApiBoxItem->SetVisible(fIsApiMode);
+    if (fProfileBoxItem)
+        fProfileBoxItem->SetVisible(fIsApiMode);
 
     _ResizeToFit();
 }
+
+// ---------------------------------------------------------------------------
+// Launch logic
+// ---------------------------------------------------------------------------
 
 void
 LauncherWindow::_Launch()
@@ -304,34 +400,33 @@ LauncherWindow::_Launch()
 
     // Validate API fields if in API mode
     if (fApiRadio->Value() == B_CONTROL_ON) {
-        BString apiUrl = fApiUrlField->Text();
-        if (apiUrl.Length() == 0) {
+        if (BString(fApiUrlField->Text()).Length() == 0) {
             BAlert* alert = new BAlert("Missing API URL",
                 "API URL cannot be empty.", "OK");
             alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
             alert->Go();
             return;
         }
-        BString apiKey = fApiKeyField->Text();
-        if (apiKey.Length() == 0) {
+        if (BString(fApiKeyField->Text()).Length() == 0) {
             BAlert* alert = new BAlert("Missing API Key",
                 "API Key cannot be empty.", "OK");
             alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
             alert->Go();
             return;
         }
+        // Apply attribution header fix before launching
+        if (fFixAttributionCheck->Value() == B_CONTROL_ON)
+            _ApplyAttributionHeaderFix();
     }
 
-    // Build the shell command
+    // Build shell command
     BString cmd;
     if (workDir.Length() > 0)
         cmd << "cd " << shellEscape(workDir) << " && ";
 
     if (fCloudRadio->Value() == B_CONTROL_ON) {
-        // Unset API key to avoid conflict with claude.ai OAuth token
         cmd << "unset ANTHROPIC_API_KEY && " << kClaudeBin;
 
-        // Add model selection
         if (fCloudSonnetRadio->Value() == B_CONTROL_ON)
             cmd << " --model sonnet";
         else if (fCloudHaikuRadio->Value() == B_CONTROL_ON)
@@ -341,42 +436,50 @@ LauncherWindow::_Launch()
     } else if (fApiRadio->Value() == B_CONTROL_ON) {
         BString apiUrl = fApiUrlField->Text();
         BString apiKey = fApiKeyField->Text();
-        // Use trap to guarantee credentials are restored on exit (even if claude crashes)
-        cmd << "trap 'mv \"$HOME/.claude/.credentials.json.bak\" \"$HOME/.claude/.credentials.json\" 2>/dev/null' EXIT; "
-            << "mv \"$HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json.bak\" 2>/dev/null; "
+        // trap ensures credentials are restored on exit even if claude crashes
+        cmd << "trap 'mv \"$HOME/.claude/.credentials.json.bak\" "
+               "\"$HOME/.claude/.credentials.json\" 2>/dev/null' EXIT; "
+            << "mv \"$HOME/.claude/.credentials.json\" "
+               "\"$HOME/.claude/.credentials.json.bak\" 2>/dev/null; "
             << "ANTHROPIC_BASE_URL=" << shellEscape(apiUrl)
             << " ANTHROPIC_API_KEY=" << shellEscape(apiKey);
 
         if (fApiOpusModelCheck->Value() == B_CONTROL_ON) {
-            BString opusModel = fApiOpusModelField->Text();
-            if (opusModel.Length() > 0)
-                cmd << " ANTHROPIC_DEFAULT_OPUS_MODEL=" << shellEscape(opusModel);
+            BString m = fApiOpusModelField->Text();
+            if (m.Length() > 0)
+                cmd << " ANTHROPIC_DEFAULT_OPUS_MODEL=" << shellEscape(m);
         }
         if (fApiSonnetModelCheck->Value() == B_CONTROL_ON) {
-            BString sonnetModel = fApiSonnetModelField->Text();
-            if (sonnetModel.Length() > 0)
-                cmd << " ANTHROPIC_DEFAULT_SONNET_MODEL=" << shellEscape(sonnetModel);
+            BString m = fApiSonnetModelField->Text();
+            if (m.Length() > 0)
+                cmd << " ANTHROPIC_DEFAULT_SONNET_MODEL=" << shellEscape(m);
         }
         if (fApiHaikuModelCheck->Value() == B_CONTROL_ON) {
-            BString haikuModel = fApiHaikuModelField->Text();
-            if (haikuModel.Length() > 0)
-                cmd << " ANTHROPIC_DEFAULT_HAIKU_MODEL=" << shellEscape(haikuModel);
+            BString m = fApiHaikuModelField->Text();
+            if (m.Length() > 0)
+                cmd << " ANTHROPIC_DEFAULT_HAIKU_MODEL=" << shellEscape(m);
         }
 
         cmd << " " << kClaudeBin;
 
         if (fApiCurrentModelCheck->Value() == B_CONTROL_ON) {
-            BString currentModel = fApiCurrentModelField->Text();
-            if (currentModel.Length() > 0)
-                cmd << " --model " << shellEscape(currentModel);
+            BString m = fApiCurrentModelField->Text();
+            if (m.Length() > 0)
+                cmd << " --model " << shellEscape(m);
         }
     }
+
+    if (fYoloCheck->Value() == B_CONTROL_ON)
+        cmd << " --dangerously-skip-permissions";
+
+    // Disable claude's auto-updater — it would replace the pinned 2.1.112
+    // pure-JS install with a native binary variant that has no Haiku build.
+    cmd.Prepend("DISABLE_AUTOUPDATER=1 ");
 
     _SaveSettings();
 
     if (isatty(STDIN_FILENO)) {
         // Launched from a terminal — exec claude there after the GUI exits
-        // rather than opening a second terminal window.
         gPendingExec = cmd;
     } else {
         // Launched from Tracker/Deskbar — spawn a fresh Terminal process.
@@ -389,8 +492,37 @@ LauncherWindow::_Launch()
             if (entry.GetPath(&termPath) == B_OK) {
                 pid_t pid = fork();
                 if (pid == 0) {
-                    execl(termPath.Path(), "Terminal",
-                          "/bin/sh", "-c", cmd.String(), (char*)nullptr);
+                    // Write a temp script and have Terminal exec it directly.
+                    // This avoids any Terminal argv-parsing ambiguity and lets
+                    // us pause on failure so startup errors are visible.
+                    BPath scriptPath;
+                    if (find_directory(B_USER_CACHE_DIRECTORY, &scriptPath) == B_OK) {
+                        scriptPath.Append("haiclaude-launch.sh");
+                        BFile script(scriptPath.Path(),
+                            B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+                        if (script.InitCheck() == B_OK) {
+                            BString s = "#!/bin/sh\n";
+                            s << ". /etc/profile.d/npm-global.sh 2>/dev/null\n";
+                            s << "export PATH=\"$HOME/.npm-global/bin:$PATH\"\n";
+                            // Disable claude's auto-updater — it replaces the
+                            // pinned 2.1.112 pure-JS install with a native
+                            // binary variant that has no Haiku build.
+                            s << "export DISABLE_AUTOUPDATER=1\n";
+                            s << cmd << "\n";
+                            s << "rc=$?\n";
+                            s << "if [ $rc -ne 0 ]; then\n";
+                            s << "  echo\n";
+                            s << "  echo \"Claude Code exited with status $rc. "
+                                 "Press Enter to close.\"\n";
+                            s << "  read _\n";
+                            s << "fi\n";
+                            script.Write(s.String(), s.Length());
+                        }
+                        script.Unset();
+                        chmod(scriptPath.Path(), 0755);
+                        execl(termPath.Path(), "Terminal",
+                              scriptPath.Path(), (char*)nullptr);
+                    }
                     _exit(1);
                 }
             }
@@ -399,6 +531,335 @@ LauncherWindow::_Launch()
 
     be_app->PostMessage(B_QUIT_REQUESTED);
 }
+
+// ---------------------------------------------------------------------------
+// Attribution header fix — sets CLAUDE_CODE_ATTRIBUTION_HEADER=0 in
+// ~/.claude/settings.json to avoid ~90% inference slowdown with local LLMs
+// ---------------------------------------------------------------------------
+
+void
+LauncherWindow::_ApplyAttributionHeaderFix()
+{
+    BPath homePath;
+    if (find_directory(B_USER_DIRECTORY, &homePath) != B_OK) return;
+
+    BPath dirPath(homePath);
+    dirPath.Append(".claude");
+    create_directory(dirPath.Path(), 0755);
+
+    BPath settingsPath(dirPath);
+    settingsPath.Append("settings.json");
+
+    BString json;
+    {
+        BFile file(settingsPath.Path(), B_READ_ONLY);
+        if (file.InitCheck() == B_OK) {
+            off_t size;
+            file.GetSize(&size);
+            if (size > 0 && size < 1024 * 1024) {
+                char* buf = json.LockBuffer(size);
+                file.Read(buf, size);
+                json.UnlockBuffer(size);
+            }
+        }
+    }
+
+    if (json.IsEmpty()) json = "{}";
+
+    const char* kKey = "\"CLAUDE_CODE_ATTRIBUTION_HEADER\"";
+    const char* kEnv = "\"env\"";
+
+    int32 keyPos = json.FindFirst(kKey);
+    if (keyPos >= 0) {
+        // Key exists — update its value to "0"
+        int32 colonPos = json.FindFirst(':', keyPos + (int32)strlen(kKey));
+        if (colonPos >= 0) {
+            int32 p = colonPos + 1;
+            while (p < json.Length() && (json[p] == ' ' || json[p] == '\t')) p++;
+            if (p < json.Length() && json[p] == '"') {
+                int32 end = json.FindFirst('"', p + 1);
+                if (end >= 0) {
+                    json.Remove(p, end - p + 1);
+                    json.Insert("\"0\"", p);
+                }
+            }
+        }
+    } else {
+        int32 envPos = json.FindFirst(kEnv);
+        if (envPos >= 0) {
+            // "env" exists — add key inside it
+            int32 brace = json.FindFirst('{', envPos + (int32)strlen(kEnv));
+            if (brace >= 0) {
+                int32 p = brace + 1;
+                while (p < json.Length() &&
+                       (json[p]==' '||json[p]=='\n'||json[p]=='\r'||json[p]=='\t'))
+                    p++;
+                BString ins;
+                if (json[p] != '}')
+                    ins = "\n    \"CLAUDE_CODE_ATTRIBUTION_HEADER\": \"0\",";
+                else
+                    ins = "\n    \"CLAUDE_CODE_ATTRIBUTION_HEADER\": \"0\"\n  ";
+                json.Insert(ins, brace + 1);
+            }
+        } else {
+            // No "env" key — add before closing brace of root object
+            int32 closePos = json.FindLast('}');
+            if (closePos >= 0) {
+                int32 p = closePos - 1;
+                while (p >= 0 &&
+                       (json[p]==' '||json[p]=='\n'||json[p]=='\r'||json[p]=='\t')) p--;
+                bool isEmpty = (p >= 0 && json[p] == '{');
+                BString ins;
+                if (!isEmpty) ins = ",";
+                ins << "\n  \"env\": {\n    \"CLAUDE_CODE_ATTRIBUTION_HEADER\": \"0\"\n  }";
+                json.Insert(ins, closePos);
+            }
+        }
+    }
+
+    BFile outFile(settingsPath.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+    if (outFile.InitCheck() != B_OK) {
+        BAlert* alert = new BAlert("Error",
+            "Could not write to ~/.claude/settings.json.", "OK");
+        alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+        alert->Go();
+        return;
+    }
+    outFile.Write(json.String(), json.Length());
+}
+
+// ---------------------------------------------------------------------------
+// Profile management
+// ---------------------------------------------------------------------------
+
+void
+LauncherWindow::_PopulateProfileMenu()
+{
+    while (fProfileMenu->CountItems() > 0)
+        delete fProfileMenu->RemoveItem((int32)0);
+
+    for (int32 i = 0; i < fProfileNames.CountStrings(); i++) {
+        const BString& name = fProfileNames.StringAt(i);
+        BMessage* msg = new BMessage(MSG_PROFILE_SELECTED);
+        msg->AddString("name", name.String());
+        fProfileMenu->AddItem(new BMenuItem(name.String(), msg));
+    }
+    fProfileMenu->SetTargetForItems(this);
+}
+
+void
+LauncherWindow::_LoadProfiles()
+{
+    fProfileListView->MakeEmpty();
+    _PopulateProfileMenu();
+
+    for (int32 i = 0; i < fProfileNames.CountStrings(); i++)
+        fProfileListView->AddItem(new BStringItem(fProfileNames.StringAt(i).String()));
+
+    // Restore active profile selection and fields
+    if (!fActiveProfile.IsEmpty()) {
+        for (int32 i = 0; i < fProfileMenu->CountItems(); i++) {
+            BMenuItem* item = fProfileMenu->ItemAt(i);
+            if (item && fActiveProfile == item->Label()) {
+                item->SetMarked(true);
+                break;
+            }
+        }
+        _LoadProfileIntoUI(fActiveProfile.String());
+    }
+}
+
+void
+LauncherWindow::_LoadProfileIntoUI(const char* name)
+{
+    BString pfx = "profile_";
+    pfx << name << "_";
+
+    const char* val;
+    bool bval;
+
+    if (fProfileData.FindString(pkey(pfx, "url").String(), &val) == B_OK)
+        fApiUrlField->SetText(val);
+
+    bval = false;
+    if (fProfileData.FindBool(pkey(pfx, "saveKey").String(), &bval) == B_OK)
+        fSaveApiKeyCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+    if (bval) {
+        if (fProfileData.FindString(pkey(pfx, "key").String(), &val) == B_OK)
+            fApiKeyField->SetText(val);
+    }
+
+    bval = false;
+    if (fProfileData.FindBool(pkey(pfx, "currentModelCheck").String(), &bval) == B_OK) {
+        fApiCurrentModelCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (fApiCurrentModelFieldItem)
+            fApiCurrentModelFieldItem->SetVisible(bval);
+    }
+    if (fProfileData.FindString(pkey(pfx, "currentModel").String(), &val) == B_OK)
+        fApiCurrentModelField->SetText(val);
+
+    bval = false;
+    if (fProfileData.FindBool(pkey(pfx, "opusModelCheck").String(), &bval) == B_OK) {
+        fApiOpusModelCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (fApiOpusModelFieldItem)
+            fApiOpusModelFieldItem->SetVisible(bval);
+    }
+    if (fProfileData.FindString(pkey(pfx, "opusModel").String(), &val) == B_OK)
+        fApiOpusModelField->SetText(val);
+
+    bval = false;
+    if (fProfileData.FindBool(pkey(pfx, "sonnetModelCheck").String(), &bval) == B_OK) {
+        fApiSonnetModelCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (fApiSonnetModelFieldItem)
+            fApiSonnetModelFieldItem->SetVisible(bval);
+    }
+    if (fProfileData.FindString(pkey(pfx, "sonnetModel").String(), &val) == B_OK)
+        fApiSonnetModelField->SetText(val);
+
+    bval = false;
+    if (fProfileData.FindBool(pkey(pfx, "haikuModelCheck").String(), &bval) == B_OK) {
+        fApiHaikuModelCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (fApiHaikuModelFieldItem)
+            fApiHaikuModelFieldItem->SetVisible(bval);
+    }
+    if (fProfileData.FindString(pkey(pfx, "haikuModel").String(), &val) == B_OK)
+        fApiHaikuModelField->SetText(val);
+
+    bval = false;
+    if (fProfileData.FindBool(pkey(pfx, "fixAttribution").String(), &bval) == B_OK)
+        fFixAttributionCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+}
+
+void
+LauncherWindow::_SaveProfile()
+{
+    BString name = fProfileNameField->Text();
+    name.Trim();
+
+    if (name.IsEmpty()) {
+        // No name typed — treat as update of currently-selected profile
+        BMenuItem* marked = fProfileMenu->FindMarked();
+        if (marked == nullptr) {
+            BAlert* alert = new BAlert("No Profile Name",
+                "Enter a name for the new profile, or select an existing one to update.",
+                "OK");
+            alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+            alert->Go();
+            return;
+        }
+        name = marked->Label();
+    }
+
+    bool isNew = (fProfileNames.IndexOf(name) < 0);
+
+    BString pfx = "profile_";
+    pfx << name << "_";
+
+    // Update profile data in-memory store
+    fProfileData.RemoveName(pkey(pfx, "url").String());
+    fProfileData.AddString(pkey(pfx, "url").String(), fApiUrlField->Text());
+
+    bool saveKey = fSaveApiKeyCheck->Value() == B_CONTROL_ON;
+    fProfileData.RemoveName(pkey(pfx, "saveKey").String());
+    fProfileData.AddBool(pkey(pfx, "saveKey").String(), saveKey);
+    fProfileData.RemoveName(pkey(pfx, "key").String());
+    if (saveKey)
+        fProfileData.AddString(pkey(pfx, "key").String(), fApiKeyField->Text());
+
+    fProfileData.RemoveName(pkey(pfx, "currentModelCheck").String());
+    fProfileData.AddBool(pkey(pfx, "currentModelCheck").String(),
+        fApiCurrentModelCheck->Value() == B_CONTROL_ON);
+    fProfileData.RemoveName(pkey(pfx, "currentModel").String());
+    fProfileData.AddString(pkey(pfx, "currentModel").String(), fApiCurrentModelField->Text());
+
+    fProfileData.RemoveName(pkey(pfx, "opusModelCheck").String());
+    fProfileData.AddBool(pkey(pfx, "opusModelCheck").String(),
+        fApiOpusModelCheck->Value() == B_CONTROL_ON);
+    fProfileData.RemoveName(pkey(pfx, "opusModel").String());
+    fProfileData.AddString(pkey(pfx, "opusModel").String(), fApiOpusModelField->Text());
+
+    fProfileData.RemoveName(pkey(pfx, "sonnetModelCheck").String());
+    fProfileData.AddBool(pkey(pfx, "sonnetModelCheck").String(),
+        fApiSonnetModelCheck->Value() == B_CONTROL_ON);
+    fProfileData.RemoveName(pkey(pfx, "sonnetModel").String());
+    fProfileData.AddString(pkey(pfx, "sonnetModel").String(), fApiSonnetModelField->Text());
+
+    fProfileData.RemoveName(pkey(pfx, "haikuModelCheck").String());
+    fProfileData.AddBool(pkey(pfx, "haikuModelCheck").String(),
+        fApiHaikuModelCheck->Value() == B_CONTROL_ON);
+    fProfileData.RemoveName(pkey(pfx, "haikuModel").String());
+    fProfileData.AddString(pkey(pfx, "haikuModel").String(), fApiHaikuModelField->Text());
+
+    fProfileData.RemoveName(pkey(pfx, "fixAttribution").String());
+    fProfileData.AddBool(pkey(pfx, "fixAttribution").String(),
+        fFixAttributionCheck->Value() == B_CONTROL_ON);
+
+    if (isNew) {
+        fProfileNames.Add(name);
+        fProfileListView->AddItem(new BStringItem(name.String()));
+        _PopulateProfileMenu();
+    }
+
+    // Mark as active and update menu
+    fActiveProfile = name;
+    fProfileNameField->SetText("");
+    for (int32 i = 0; i < fProfileMenu->CountItems(); i++) {
+        BMenuItem* item = fProfileMenu->ItemAt(i);
+        if (item && name == item->Label()) {
+            item->SetMarked(true);
+            break;
+        }
+    }
+
+    _SaveSettings();
+
+    BAlert* alert = new BAlert("Profile Saved",
+        isNew ? "Profile created." : "Profile updated.", "OK");
+    alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+    alert->Go();
+}
+
+void
+LauncherWindow::_DeleteProfile()
+{
+    int32 sel = fProfileListView->CurrentSelection();
+    if (sel < 0) return;
+
+    BStringItem* item = (BStringItem*)fProfileListView->ItemAt(sel);
+    if (item == nullptr) return;
+
+    BString name = item->Text();
+
+    fProfileListView->RemoveItem(sel);
+    delete item;
+
+    int32 idx = fProfileNames.IndexOf(name);
+    if (idx >= 0) fProfileNames.Remove(idx);
+
+    // Remove all per-profile fields
+    BString pfx = "profile_";
+    pfx << name << "_";
+    const char* kSuffixes[] = {
+        "url", "key", "saveKey",
+        "currentModelCheck", "currentModel",
+        "opusModelCheck",    "opusModel",
+        "sonnetModelCheck",  "sonnetModel",
+        "haikuModelCheck",   "haikuModel",
+        "fixAttribution",    nullptr
+    };
+    for (int i = 0; kSuffixes[i]; i++)
+        fProfileData.RemoveName(pkey(pfx, kSuffixes[i]).String());
+
+    if (fActiveProfile == name) fActiveProfile = "";
+
+    _PopulateProfileMenu();
+    fDeleteProfileBtn->SetEnabled(false);
+    _SaveSettings();
+}
+
+// ---------------------------------------------------------------------------
+// Settings persistence
+// ---------------------------------------------------------------------------
 
 void
 LauncherWindow::_LoadSettings()
@@ -410,88 +871,106 @@ LauncherWindow::_LoadSettings()
     BFile file(path.Path(), B_READ_ONLY);
     if (file.InitCheck() != B_OK) return;
 
-    BMessage settings;
-    if (settings.Unflatten(&file) != B_OK) return;
+    BMessage s;
+    if (s.Unflatten(&file) != B_OK) return;
 
-    int32 mode = 0;  // 0=cloud, 1=api
-    settings.FindInt32("mode", &mode);
+    // Mode
+    int32 mode = 0;
+    s.FindInt32("mode", &mode);
     if (mode == 1) {
         fIsApiMode = true;
         fApiRadio->SetValue(B_CONTROL_ON);
         fCloudRadio->SetValue(B_CONTROL_OFF);
     }
 
-    int32 cloudModel = 0;  // 0=opus, 1=sonnet, 2=haiku
-    settings.FindInt32("cloudModel", &cloudModel);
-    if (cloudModel == 1) {
-        fCloudSonnetRadio->SetValue(B_CONTROL_ON);
-    } else if (cloudModel == 2) {
-        fCloudHaikuRadio->SetValue(B_CONTROL_ON);
-    } else {
-        fCloudOpusRadio->SetValue(B_CONTROL_ON);
+    // Cloud model
+    int32 cloudModel = 0;
+    s.FindInt32("cloudModel", &cloudModel);
+    if (cloudModel == 1)      fCloudSonnetRadio->SetValue(B_CONTROL_ON);
+    else if (cloudModel == 2) fCloudHaikuRadio->SetValue(B_CONTROL_ON);
+    else                      fCloudOpusRadio->SetValue(B_CONTROL_ON);
+
+    // Working directory
+    const char* str;
+    if (s.FindString("workDir", &str) == B_OK) fWorkDirField->SetText(str);
+
+    // API URL
+    if (s.FindString("apiUrl", &str) == B_OK) fApiUrlField->SetText(str);
+
+    // API key
+    bool saveKey = false;
+    if (s.FindBool("saveApiKey", &saveKey) == B_OK)
+        fSaveApiKeyCheck->SetValue(saveKey ? B_CONTROL_ON : B_CONTROL_OFF);
+    if (saveKey) {
+        if (s.FindString("apiKey", &str) == B_OK) fApiKeyField->SetText(str);
     }
 
-    const char* workDir = nullptr;
-    if (settings.FindString("workDir", &workDir) == B_OK)
-        fWorkDirField->SetText(workDir);
-
-    const char* apiUrl = nullptr;
-    if (settings.FindString("apiUrl", &apiUrl) == B_OK)
-        fApiUrlField->SetText(apiUrl);
-
-    // Only load API key if saveApiKey is true
-    bool saveApiKey = false;
-    if (settings.FindBool("saveApiKey", &saveApiKey) == B_OK)
-        fSaveApiKeyCheck->SetValue(saveApiKey ? B_CONTROL_ON : B_CONTROL_OFF);
-    if (saveApiKey) {
-        const char* apiKey = nullptr;
-        if (settings.FindString("apiKey", &apiKey) == B_OK)
-            fApiKeyField->SetText(apiKey);
+    // Model overrides
+    bool bval;
+    if (s.FindBool("apiCurrentModelCheck", &bval) == B_OK) {
+        fApiCurrentModelCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (fApiCurrentModelFieldItem) fApiCurrentModelFieldItem->SetVisible(bval);
     }
+    if (s.FindString("apiCurrentModel", &str) == B_OK)
+        fApiCurrentModelField->SetText(str);
 
-    bool currentModelCheck = false;
-    if (settings.FindBool("apiCurrentModelCheck", &currentModelCheck) == B_OK) {
-        fApiCurrentModelCheck->SetValue(currentModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
-        if (fApiCurrentModelFieldItem)
-            fApiCurrentModelFieldItem->SetVisible(currentModelCheck);
+    if (s.FindBool("apiOpusModelCheck", &bval) == B_OK) {
+        fApiOpusModelCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (fApiOpusModelFieldItem) fApiOpusModelFieldItem->SetVisible(bval);
     }
+    if (s.FindString("apiOpusModel", &str) == B_OK)
+        fApiOpusModelField->SetText(str);
 
-    const char* apiCurrentModel = nullptr;
-    if (settings.FindString("apiCurrentModel", &apiCurrentModel) == B_OK)
-        fApiCurrentModelField->SetText(apiCurrentModel);
-
-    bool opusModelCheck = false;
-    if (settings.FindBool("apiOpusModelCheck", &opusModelCheck) == B_OK) {
-        fApiOpusModelCheck->SetValue(opusModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
-        if (fApiOpusModelFieldItem)
-            fApiOpusModelFieldItem->SetVisible(opusModelCheck);
+    if (s.FindBool("apiSonnetModelCheck", &bval) == B_OK) {
+        fApiSonnetModelCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (fApiSonnetModelFieldItem) fApiSonnetModelFieldItem->SetVisible(bval);
     }
+    if (s.FindString("apiSonnetModel", &str) == B_OK)
+        fApiSonnetModelField->SetText(str);
 
-    const char* apiOpusModel = nullptr;
-    if (settings.FindString("apiOpusModel", &apiOpusModel) == B_OK)
-        fApiOpusModelField->SetText(apiOpusModel);
-
-    bool sonnetModelCheck = false;
-    if (settings.FindBool("apiSonnetModelCheck", &sonnetModelCheck) == B_OK) {
-        fApiSonnetModelCheck->SetValue(sonnetModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
-        if (fApiSonnetModelFieldItem)
-            fApiSonnetModelFieldItem->SetVisible(sonnetModelCheck);
+    if (s.FindBool("apiHaikuModelCheck", &bval) == B_OK) {
+        fApiHaikuModelCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+        if (fApiHaikuModelFieldItem) fApiHaikuModelFieldItem->SetVisible(bval);
     }
+    if (s.FindString("apiHaikuModel", &str) == B_OK)
+        fApiHaikuModelField->SetText(str);
 
-    const char* apiSonnetModel = nullptr;
-    if (settings.FindString("apiSonnetModel", &apiSonnetModel) == B_OK)
-        fApiSonnetModelField->SetText(apiSonnetModel);
+    // YOLO mode
+    if (s.FindBool("yoloMode", &bval) == B_OK)
+        fYoloCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
 
-    bool haikuModelCheck = false;
-    if (settings.FindBool("apiHaikuModelCheck", &haikuModelCheck) == B_OK) {
-        fApiHaikuModelCheck->SetValue(haikuModelCheck ? B_CONTROL_ON : B_CONTROL_OFF);
-        if (fApiHaikuModelFieldItem)
-            fApiHaikuModelFieldItem->SetVisible(haikuModelCheck);
+    // Attribution header fix
+    if (s.FindBool("fixAttribution", &bval) == B_OK)
+        fFixAttributionCheck->SetValue(bval ? B_CONTROL_ON : B_CONTROL_OFF);
+
+    // Active profile
+    if (s.FindString("activeProfile", &str) == B_OK)
+        fActiveProfile = str;
+
+    // Profile names list
+    fProfileNames.MakeEmpty();
+    const char* pname;
+    for (int32 i = 0; s.FindString("profileNames", i, &pname) == B_OK; i++)
+        fProfileNames.Add(pname);
+
+    // Copy all profile_* fields into fProfileData
+    fProfileData.MakeEmpty();
+    int32 n = s.CountNames(B_ANY_TYPE);
+    for (int32 i = 0; i < n; i++) {
+        char* fname = nullptr;
+        type_code ftype;
+        s.GetInfo(B_ANY_TYPE, i, &fname, &ftype);
+        if (fname == nullptr || strncmp(fname, "profile_", 8) != 0) continue;
+        if (ftype == B_STRING_TYPE) {
+            const char* sv;
+            if (s.FindString(fname, &sv) == B_OK)
+                fProfileData.AddString(fname, sv);
+        } else if (ftype == B_BOOL_TYPE) {
+            bool bv;
+            if (s.FindBool(fname, &bv) == B_OK)
+                fProfileData.AddBool(fname, bv);
+        }
     }
-
-    const char* apiHaikuModel = nullptr;
-    if (settings.FindString("apiHaikuModel", &apiHaikuModel) == B_OK)
-        fApiHaikuModelField->SetText(apiHaikuModel);
 }
 
 void
@@ -501,38 +980,59 @@ LauncherWindow::_SaveSettings()
     if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK) return;
     path.Append("HaiClaude");
 
+    BMessage s;
+
+    int32 mode = (fApiRadio->Value() == B_CONTROL_ON) ? 1 : 0;
+    s.AddInt32("mode", mode);
+
+    int32 cloudModel = 0;
+    if (fCloudSonnetRadio->Value() == B_CONTROL_ON)      cloudModel = 1;
+    else if (fCloudHaikuRadio->Value() == B_CONTROL_ON) cloudModel = 2;
+    s.AddInt32("cloudModel", cloudModel);
+
+    s.AddString("workDir", fWorkDirField->Text());
+    s.AddString("apiUrl",  fApiUrlField->Text());
+
+    bool saveKey = fSaveApiKeyCheck->Value() == B_CONTROL_ON;
+    s.AddBool("saveApiKey", saveKey);
+    if (saveKey) s.AddString("apiKey", fApiKeyField->Text());
+
+    s.AddBool("apiCurrentModelCheck", fApiCurrentModelCheck->Value() == B_CONTROL_ON);
+    s.AddString("apiCurrentModel",    fApiCurrentModelField->Text());
+    s.AddBool("apiOpusModelCheck",    fApiOpusModelCheck->Value() == B_CONTROL_ON);
+    s.AddString("apiOpusModel",       fApiOpusModelField->Text());
+    s.AddBool("apiSonnetModelCheck",  fApiSonnetModelCheck->Value() == B_CONTROL_ON);
+    s.AddString("apiSonnetModel",     fApiSonnetModelField->Text());
+    s.AddBool("apiHaikuModelCheck",   fApiHaikuModelCheck->Value() == B_CONTROL_ON);
+    s.AddString("apiHaikuModel",      fApiHaikuModelField->Text());
+
+    s.AddBool("yoloMode",      fYoloCheck->Value() == B_CONTROL_ON);
+    s.AddBool("fixAttribution", fFixAttributionCheck->Value() == B_CONTROL_ON);
+
+    s.AddString("activeProfile", fActiveProfile);
+
+    for (int32 i = 0; i < fProfileNames.CountStrings(); i++)
+        s.AddString("profileNames", fProfileNames.StringAt(i));
+
+    // Copy all profile_* fields from in-memory store
+    int32 n = fProfileData.CountNames(B_ANY_TYPE);
+    for (int32 i = 0; i < n; i++) {
+        char* fname = nullptr;
+        type_code ftype;
+        fProfileData.GetInfo(B_ANY_TYPE, i, &fname, &ftype);
+        if (fname == nullptr) continue;
+        if (ftype == B_STRING_TYPE) {
+            const char* sv;
+            if (fProfileData.FindString(fname, &sv) == B_OK)
+                s.AddString(fname, sv);
+        } else if (ftype == B_BOOL_TYPE) {
+            bool bv;
+            if (fProfileData.FindBool(fname, &bv) == B_OK)
+                s.AddBool(fname, bv);
+        }
+    }
+
     BFile file(path.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
     if (file.InitCheck() != B_OK) return;
-
-    int32 mode = 0;  // 0=cloud, 1=api
-    if (fApiRadio->Value() == B_CONTROL_ON)
-        mode = 1;
-
-    int32 cloudModel = 0;  // 0=opus, 1=sonnet, 2=haiku
-    if (fCloudSonnetRadio->Value() == B_CONTROL_ON)
-        cloudModel = 1;
-    else if (fCloudHaikuRadio->Value() == B_CONTROL_ON)
-        cloudModel = 2;
-
-    BMessage settings;
-    settings.AddInt32("mode", mode);
-    settings.AddInt32("cloudModel", cloudModel);
-    settings.AddString("workDir", fWorkDirField->Text());
-    settings.AddString("apiUrl", fApiUrlField->Text());
-
-    // Only save API key if checkbox is checked
-    bool saveApiKey = fSaveApiKeyCheck->Value() == B_CONTROL_ON;
-    settings.AddBool("saveApiKey", saveApiKey);
-    if (saveApiKey)
-        settings.AddString("apiKey", fApiKeyField->Text());
-
-    settings.AddBool("apiCurrentModelCheck", fApiCurrentModelCheck->Value() == B_CONTROL_ON);
-    settings.AddString("apiCurrentModel", fApiCurrentModelField->Text());
-    settings.AddBool("apiOpusModelCheck", fApiOpusModelCheck->Value() == B_CONTROL_ON);
-    settings.AddString("apiOpusModel", fApiOpusModelField->Text());
-    settings.AddBool("apiSonnetModelCheck", fApiSonnetModelCheck->Value() == B_CONTROL_ON);
-    settings.AddString("apiSonnetModel", fApiSonnetModelField->Text());
-    settings.AddBool("apiHaikuModelCheck", fApiHaikuModelCheck->Value() == B_CONTROL_ON);
-    settings.AddString("apiHaikuModel", fApiHaikuModelField->Text());
-    settings.Flatten(&file);
+    s.Flatten(&file);
 }

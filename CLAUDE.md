@@ -25,6 +25,24 @@ npm install -g @anthropic-ai/claude-code@2.1.112
 Do **not** add `--save-exact` or `--force` — these flags cause npm to resolve
 to a different (native-binary) variant of the package that cannot run on Haiku.
 
+## Auto-updater must be disabled
+
+Claude Code has a built-in auto-updater. On first run after install, it silently
+replaces the pinned 2.1.112 pure-JS install with the latest version (native
+binary, no Haiku build). Symptom: works once after install, then fails on every
+subsequent run with `claude native binary not installed`.
+
+The launcher sets `DISABLE_AUTOUPDATER=1` in the environment before invoking
+claude — both in the isatty=true exec path and in the Terminal-spawn wrapper
+script. Do not remove this.
+
+To recover a broken install:
+```sh
+npm uninstall -g @anthropic-ai/claude-code
+npm install -g @anthropic-ai/claude-code@2.1.112
+readlink ~/.npm-global/bin/claude  # must show cli.js, not claude.exe
+```
+
 ## Installer behaviour
 
 `InstallerWindow.cpp` runs these steps in order:
@@ -45,8 +63,8 @@ to a different (native-binary) variant of the package that cannot run on Haiku.
 
 - **Show/hide resize:** call `InvalidateLayout(true)` + `SetSizeLimits(w,w,h,h)` before `ResizeTo` — `B_AUTO_UPDATE_SIZE_LIMITS` caches stale limits.
 - **Sentinel arithmetic is a bug:** `B_USE_DEFAULT_SPACING = -1002`. Never do `B_USE_DEFAULT_SPACING + N` in layout calls.
-- **Terminal launch:** uses `fork+execl` on the Terminal binary (found via `be_roster->FindApp` → `BEntry` → `BPath`). `be_roster->Launch()` opens two windows.
-- **Terminal reuse:** if `isatty(STDIN_FILENO)`, stores command in `gPendingExec` and runs `execl` after `BApplication::Run()` returns.
+- **Terminal launch:** uses `fork+execl` on the Terminal binary (found via `be_roster->FindApp` → `BEntry` → `BPath`). `be_roster->Launch()` opens two windows. The Terminal is given a temp script under `~/.cache/haiclaude-launch.sh` that sources `/etc/profile.d/npm-global.sh`, exports `DISABLE_AUTOUPDATER=1`, runs the command, and pauses on non-zero exit so startup errors are visible.
+- **Terminal reuse:** if `isatty(STDIN_FILENO)`, stores command in `gPendingExec` (prepended with `DISABLE_AUTOUPDATER=1 `) and runs `execl` after `BApplication::Run()` returns.
 - **Directory picker:** `BFilePanel` with `B_DIRECTORY_NODE`; selected path arrives as `B_REFS_RECEIVED`.
 - **Shell escape:** all user input is wrapped with single-quote escaping (`shellEscape()` in LauncherWindow.cpp) before use in shell commands.
 - **API key backup:** in API mode, `.credentials.json` is moved aside and restored via shell `trap` to guarantee restoration even if claude crashes.
