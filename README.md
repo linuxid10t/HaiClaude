@@ -53,16 +53,20 @@ After building, run the installer which will automatically check for and install
 The installer will:
 1. Check if npm is available
 2. Install npm if needed (via `pkgman install npm nodejs20`)
-3. Check if Claude Code is already installed (looks for `~/.npm-global/bin/claude`)
-4. Install Claude Code globally via npm if needed
-5. Set up the `claude` binary at `~/.npm-global/bin/claude`
+3. Check if Claude Code 2.1.112 is already installed
+4. Install `@anthropic-ai/claude-code@2.1.112` globally via npm if needed
+5. Write `/etc/profile.d/npm-global.sh` so every new terminal has `~/.npm-global/bin` on PATH automatically
+
+> **Version note:** Claude Code is pinned to **2.1.112**. This is the last pure-JavaScript npm release; newer versions use a native binary that does not support Haiku. Do not upgrade until Haiku support is confirmed.
 
 ### Manual Setup
 
 If you prefer to install Claude Code manually:
 
-1. Install npm: `pkgman install npm`
-2. Install Claude Code: `npm install -g @anthropic-ai/claude-code`
+1. Install npm: `pkgman install npm nodejs20`
+2. Configure the prefix: `npm config set prefix ~/.npm-global`
+3. Install Claude Code: `npm install -g @anthropic-ai/claude-code@2.1.112`
+4. Add to PATH: `echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> /etc/profile.d/npm-global.sh`
 
 ## Usage
 

@@ -25,6 +25,8 @@ Presents a small window with two launch modes and a working directory picker:
 |---|---|
 | `main.cpp` | `BApplication` entry point |
 | `LauncherWindow.h/cpp` | Single window — all UI and logic |
+| `installer_main.cpp` | Installer `BApplication` entry point |
+| `InstallerWindow.h/cpp` | Installer window — npm/Claude Code setup logic |
 | `Makefile` | Build rules |
 
 ## Build
@@ -34,8 +36,13 @@ make
 ./haiclaude
 ```
 
-Requires Haiku R1.0 or later.
-Links: `-lbe -lroot -ltracker`
+Requires Haiku R1β5 or later (64-bit). Links: `-lbe -lroot -ltracker`
+
+## Claude Code version
+
+Pinned to **`@anthropic-ai/claude-code@2.1.112`** — the last pure-JavaScript npm
+release. Newer versions ship a native binary that does not support Haiku. The
+installer enforces this version; do not upgrade until Haiku support is confirmed.
 
 ## Key implementation notes
 - **Show/Hide resize** requires `InvalidateLayout(true)` +

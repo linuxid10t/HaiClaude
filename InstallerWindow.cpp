@@ -142,10 +142,10 @@ InstallerWindow::MessageReceived(BMessage* msg)
             fClaudeInstalled = output.FindFirst("found") >= 0;
 
             if (fClaudeInstalled) {
-                _LogAppend("Claude Code is already installed!\n");
+                _LogAppend("Claude Code 2.1.112 is already installed!\n");
                 _SetState(StateSuccess);
             } else {
-                _LogAppend("Claude Code not found. Installing...\n");
+                _LogAppend("Claude Code 2.1.112 not found (or wrong version). Installing...\n");
                 _SetState(StateInstallingClaude);
                 _InstallClaude();
             }
@@ -223,7 +223,9 @@ InstallerWindow::_StartInstallation()
 void
 InstallerWindow::_CheckClaudeInstalled()
 {
-    _SpawnCommand("test -x /boot/home/.npm-global/bin/claude && echo found 2>&1", MSG_CHECK_CLAUDE_DONE);
+    // 2.1.112 ships as a pure-JS package (bin -> cli.js); just run --version.
+    _SpawnCommand("/boot/home/.npm-global/bin/claude --version 2>&1 | grep -qF '2.1.112' && echo found 2>&1",
+                  MSG_CHECK_CLAUDE_DONE);
 }
 
 void
@@ -241,11 +243,22 @@ InstallerWindow::_InstallNpm()
 void
 InstallerWindow::_InstallClaude()
 {
-    // Configure npm to use a user-writable directory and install claude-code
-    // This avoids permission issues with system directories
+    // Use the exact invocation that works on Haiku: plain npm install without
+    // --save-exact or --force. The 2.1.112 package on npm is a pure-JS build
+    // (bin -> cli.js) that runs under Node.js with no native binary required.
+    // Also drop a profile.d snippet so every new terminal has the bin dir on PATH.
     _SpawnCommand("mkdir -p /boot/home/.npm-global && "
                   "npm config set prefix /boot/home/.npm-global && "
-                  "npm install -g @anthropic-ai/claude-code 2>&1", MSG_INSTALL_CLAUDE_DONE);
+                  "npm install -g @anthropic-ai/claude-code@2.1.112 2>&1 && "
+                  "if [ ! -f /etc/profile.d/npm-global.sh ]; then "
+                      "printf '# Added by HaiClaude installer\\n"
+                              "export PATH=\"$HOME/.npm-global/bin:$PATH\"\\n' "
+                          "> /etc/profile.d/npm-global.sh && "
+                      "echo 'PATH configured: /etc/profile.d/npm-global.sh created.' ; "
+                  "else "
+                      "echo 'PATH already configured.' ; "
+                  "fi 2>&1",
+                  MSG_INSTALL_CLAUDE_DONE);
 }
 
 void
