@@ -36,13 +36,18 @@ make
 ./haiclaude
 ```
 
-Requires Haiku R1β5 or later (64-bit). Links: `-lbe -lroot -ltracker`
+Requires Haiku R1β5 or later (64-bit). Links: `-lbe -lroot -ltracker -ltranslation`.
+Built with Haiku private headers (`-I/boot/system/develop/headers/private`).
 
 ## Claude Code version
 
 Pinned to **`@anthropic-ai/claude-code@2.1.112`** — the last pure-JavaScript npm
 release. Newer versions ship a native binary that does not support Haiku. The
 installer enforces this version; do not upgrade until Haiku support is confirmed.
+
+**Runtime prerequisite:** Claude Code requires the `nlohmann_json` system package
+(`pkgman install nlohmann_json`). This is a dependency of Claude Code at runtime,
+not a build dependency of HaiClaude.
 
 ## Key implementation notes
 - **Show/Hide resize** requires `InvalidateLayout(true)` +

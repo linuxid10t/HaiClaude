@@ -10,6 +10,7 @@ make haiclaude-installer  # installer only
 
 Compiler: g++ with `-std=c++17`. Links: `-lbe -lroot -ltracker -ltranslation`.
 Icon resources are attached with `xres -o <binary> icons.rsrc` after linking.
+Built with Haiku private headers (`-I/boot/system/develop/headers/private`).
 
 ## Claude Code version
 
@@ -24,6 +25,10 @@ npm install -g @anthropic-ai/claude-code@2.1.112
 ```
 Do **not** add `--save-exact` or `--force` — these flags cause npm to resolve
 to a different (native-binary) variant of the package that cannot run on Haiku.
+
+**Runtime prerequisite:** Claude Code requires the `nlohmann_json` system package
+(`pkgman install nlohmann_json`). This is a runtime dependency of Claude Code,
+not a build dependency of HaiClaude — the launcher source never `#include`s it.
 
 ## Auto-updater must be disabled
 

@@ -38,7 +38,8 @@ make haiclaude            # build launcher only
 make haiclaude-installer  # build installer only
 ```
 
-Links against: `-lbe -lroot -ltracker`
+Links against: `-lbe -lroot -ltracker -ltranslation`
+- Built with Haiku private headers (`-I/boot/system/develop/headers/private`)
 
 ## Claude Code Setup
 
@@ -58,6 +59,8 @@ The installer will:
 5. Write `/etc/profile.d/npm-global.sh` so every new terminal has `~/.npm-global/bin` on PATH automatically
 
 > **Version note:** Claude Code is pinned to **2.1.112**. This is the last pure-JavaScript npm release; newer versions use a native binary that does not support Haiku. Do not upgrade until Haiku support is confirmed.
+
+> **Runtime prerequisite:** Claude Code requires the `nlohmann_json` system package. Install it with `pkgman install nlohmann_json`. This is a runtime dependency of Claude Code, not a build dependency of HaiClaude.
 
 ### Manual Setup
 
